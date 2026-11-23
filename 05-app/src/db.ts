@@ -311,16 +311,22 @@ export async function deleteTechnician(
 export async function clientsOfTechnician(id: string): Promise<TechnicianClient[]> {
   const db = await getDb();
   const appointments = await db.getAllFromIndex("appointments", "byTechnician", id);
+  const today = todayIso();
   const map = new Map<string, TechnicianClient>();
 
   for (const appointment of appointments) {
     const key = appointment.clientId ?? appointment.phone ?? normalize(appointment.name ?? "");
     if (!key) continue;
     const current = map.get(key);
+    const isUpcoming = Boolean(appointment.date && appointment.date >= today);
+
     if (current) {
       current.visits += 1;
       if (appointment.date && (!current.lastDate || appointment.date > current.lastDate)) {
         current.lastDate = appointment.date;
+      }
+      if (isUpcoming && appointment.date && (!current.nextDate || appointment.date < current.nextDate)) {
+        current.nextDate = appointment.date;
       }
       if (!current.phone && appointment.phone) current.phone = appointment.phone;
     } else {
@@ -330,6 +336,7 @@ export async function clientsOfTechnician(id: string): Promise<TechnicianClient[
         phone: appointment.phone ?? null,
         visits: 1,
         lastDate: appointment.date ?? null,
+        nextDate: isUpcoming ? appointment.date ?? null : null,
       });
     }
   }

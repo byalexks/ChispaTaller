@@ -2824,8 +2824,55 @@ function ClientsView({
   onOpen: (client: TechnicianClient) => void;
   onAdd: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "upcoming" | "none">("all");
+
+  const fold = (value: string) =>
+    value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+  const visible = clients.filter((client) => {
+    const haystack = `${client.name} ${client.phone ?? ""}`;
+    if (query.trim() && !fold(haystack).includes(fold(query.trim()))) return false;
+    if (filter === "upcoming") return Boolean(client.nextDate);
+    if (filter === "none") return !client.nextDate;
+    return true;
+  });
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      <input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Buscar por nombre o teléfono"
+        className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm outline-none focus:border-brand"
+      />
+
+      <div className="flex gap-1">
+        {(
+          [
+            { key: "all", label: "Todos" },
+            { key: "upcoming", label: "Con cita" },
+            { key: "none", label: "Sin cita" },
+          ] as const
+        ).map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => setFilter(option.key)}
+            className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${
+              filter === option.key
+                ? "bg-brand-solid text-white"
+                : "border border-line bg-surface text-muted"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
       {clients.length === 0 ? (
         <EmptyState
           title="Todavía no hay clientes"
@@ -2834,8 +2881,12 @@ function ClientsView({
           onAction={onAdd}
           kind="clients"
         />
+      ) : visible.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-line bg-surface/70 px-4 py-6 text-center text-sm text-muted">
+          Ningún cliente coincide con la búsqueda.
+        </p>
       ) : (
-        clients.map((client) => (
+        visible.map((client) => (
           <button
             key={client.clientId}
             type="button"
@@ -2844,9 +2895,14 @@ function ClientsView({
           >
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{client.name}</p>
-              <p className="text-[11px] text-muted">
+              <p className="truncate text-[11px] text-muted">
                 {client.phone ?? "sin teléfono"} · {client.visits} visita
                 {client.visits === 1 ? "" : "s"}
+              </p>
+              <p className="mt-0.5 text-[10px] text-muted">
+                {client.nextDate
+                  ? `Próxima: ${formatShort(client.nextDate)}`
+                  : "Sin cita próxima"}
               </p>
             </div>
             <span className="shrink-0 text-lg text-muted">›</span>

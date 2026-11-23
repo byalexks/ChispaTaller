@@ -102,6 +102,7 @@ export interface TechnicianClient {
   phone: string | null;
   visits: number;
   lastDate: string | null;
+  nextDate: string | null;
 }
 
 export interface Client {
