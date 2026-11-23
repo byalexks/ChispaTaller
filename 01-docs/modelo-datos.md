@@ -1,4 +1,4 @@
-# Modelo de datos — rama trabajador
+# Modelo de datos — Producto B (técnico)
 
 Estado: **propuesta**. Se cierra cuando definamos almacenamiento.
 

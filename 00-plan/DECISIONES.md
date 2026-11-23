@@ -24,6 +24,7 @@ Formato: fecha · decisión · estado · motivo.
 | 2026-11-23 | Un mensaje pegado puede **crear, actualizar o cancelar** una cita. | Es el flujo real: reprograman y cancelan por WhatsApp todo el tiempo. El match es por teléfono y por nombre. |
 | 2026-11-23 | Tema oscuro **"dim"**: gris medio, no negro. | Pedido explícito: trabajar cómodo sin cansar la vista. |
 | 2026-11-23 | Código e identificadores en **inglés semántico**; texto de interfaz en español. | Convención pedida por el usuario. |
+| 2026-11-23 | **Producto A = negocio** (hoja de Google). **Producto B = técnico** (Chispa Taller). Todo el proyecto de Stitch pertenece al producto B. | Aclaración del usuario, para no invertir los nombres. |
 | 2026-11-23 | La base de datos **es** el libro (no hay Postgres ni Supabase). | Requisito del cliente. |
 | 2026-11-23 | Nombre del proyecto y de la carpeta: `servicio-tecnico-agenda`. | Elección del usuario. |
 | 2026-11-23 | Se empieza por un **cuestionario de descubrimiento** antes de construir el libro. | Evitar diseñar sobre supuestos; el audio deja reglas ambiguas. |

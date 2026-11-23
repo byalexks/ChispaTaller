@@ -6,12 +6,12 @@ negocio con 6 locales: 5 en Cartagena y 1 en Turbaco.
 > **Foco actual:** solo el producto del técnico (**Chispa Taller**, PWA). La rama
 > Excel / Google Sheets está **parqueada** y no se toca hasta que se pida.
 
-Dos ramas, una construida y otra parqueada:
+Dos productos, uno construido y otro parqueado:
 
-- **Rama trabajador (en construcción):** sitio web instalable como PWA. El técnico
-  pega el mensaje de WhatsApp, la app lo interpreta y arma su día.
-- **Rama Excel (parqueada):** libro de Google Sheets para el negocio completo.
-  Espera el archivo real del cliente. Ver `00-plan/RAMAS.md`.
+- **Producto B — técnico (Chispa Taller, en construcción):** sitio web instalable como
+  PWA. El técnico pega el mensaje de WhatsApp, la app lo interpreta y arma su día.
+- **Producto A — negocio (hoja de Google, parqueado):** el libro completo para el
+  negocio. Espera el archivo real del cliente. Ver `00-plan/RAMAS.md`.
 
 ## Estado
 

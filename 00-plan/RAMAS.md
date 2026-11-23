@@ -1,11 +1,15 @@
-# Las dos ramas del proyecto
+# Los dos productos
 
-Un mismo problema, dos entregables distintos. Se comparten el modelo de datos, las
-reglas y el parser; cambia dónde vive la información y quién la usa.
+Dos productos distintos, no dos versiones del mismo. Comparten el modelo de datos,
+las reglas y el parser; cambia quién los usa y dónde vive la información.
+
+> **Nomenclatura:** **Producto A = el negocio** (hoja de Google, parqueado).
+> **Producto B = el técnico** (Chispa Taller, en construcción).
+> **Todo el proyecto de Stitch corresponde al Producto B.**
 
 ---
 
-## Rama A — el trabajador (en construcción)
+## Producto B — el técnico (Chispa Taller, en construcción)
 
 **Producto:** sitio web instalable como PWA. Una persona, su día, su celular.
 
@@ -22,15 +26,16 @@ reglas y el parser; cambia dónde vive la información y quién la usa.
   los datos salgan del equipo.
 - Multi-técnico: cada uno ve su agenda y su horario.
 
-**Pantallas:** Login · Hoy · Bandeja · Semana · Pegar · Revisión · Cierre de visita
-· Horario. Modo claro y modo "dim".
+**Pantallas:** Login · Hoy · Bandeja · Semana · Clientes · Pegar · Revisión ·
+Cierre de visita · Horario · Mi perfil · Administración. Modo claro y modo "dim".
 
-**Riesgos:** un solo dispositivo (no hay sync), respaldo manual (pendiente), y en
-iPhone el navegador puede borrar datos de una PWA sin uso.
+**Riesgos:** un solo dispositivo (no hay sync entre equipos), respaldo manual
+(exportar/importar ya existe, pero hay que acordarse), y en iPhone el navegador
+puede borrar datos de una PWA sin uso.
 
 ---
 
-## Rama B — el negocio (parqueada)
+## Producto A — el negocio (hoja de Google, parqueado)
 
 **Producto:** libro de Google Sheets con todo: 6 locales, cupos, panel, historial,
 evidencias y reportes.
@@ -58,7 +63,7 @@ archivo actual sea parte del problema.
 
 ## Orden
 
-1. Cerrar el UI de la rama A. ← ahora
-2. Probarla una semana con mensajes reales.
-3. Si funciona: respaldo/export y, si pide verlo en el computador, sync.
-4. Retomar la rama B cuando llegue el Excel del cliente.
+1. Cerrar el UI del producto B. ← ahora
+2. Probarlo una semana con mensajes reales.
+3. Respaldo y pulido.
+4. Retomar el producto A cuando el usuario lo pida.
