@@ -1,0 +1,504 @@
+{
+  "generadoEn": "2026-11-23T23:50:24.947Z",
+  "tecnico": {
+    "id": "tech-1",
+    "nombre": "Técnico"
+  },
+  "locales": [
+    {
+      "id": "cartagena-1",
+      "nombre": "Cartagena 1",
+      "ciudad": "Cartagena",
+      "activo": true
+    },
+    {
+      "id": "cartagena-2",
+      "nombre": "Cartagena 2",
+      "ciudad": "Cartagena",
+      "activo": true
+    },
+    {
+      "id": "cartagena-3",
+      "nombre": "Cartagena 3",
+      "ciudad": "Cartagena",
+      "activo": true
+    },
+    {
+      "id": "cartagena-4",
+      "nombre": "Cartagena 4",
+      "ciudad": "Cartagena",
+      "activo": true
+    },
+    {
+      "id": "cartagena-5",
+      "nombre": "Cartagena 5",
+      "ciudad": "Cartagena",
+      "activo": true
+    },
+    {
+      "id": "turbaco",
+      "nombre": "Turbaco",
+      "ciudad": "Turbaco",
+      "activo": true
+    }
+  ],
+  "horario": [
+    {
+      "diaSemana": 1,
+      "jornada": "morning",
+      "desde": "08:00",
+      "hasta": "12:00",
+      "local": "Cartagena 1",
+      "cupo": 4,
+      "activo": true
+    },
+    {
+      "diaSemana": 1,
+      "jornada": "afternoon",
+      "desde": "13:00",
+      "hasta": "18:00",
+      "local": "Cartagena 1",
+      "cupo": 3,
+      "activo": true
+    },
+    {
+      "diaSemana": 2,
+      "jornada": "morning",
+      "desde": "08:00",
+      "hasta": "12:00",
+      "local": "Cartagena 1",
+      "cupo": 4,
+      "activo": true
+    },
+    {
+      "diaSemana": 2,
+      "jornada": "afternoon",
+      "desde": "13:00",
+      "hasta": "18:00",
+      "local": "Cartagena 1",
+      "cupo": 3,
+      "activo": true
+    },
+    {
+      "diaSemana": 3,
+      "jornada": "morning",
+      "desde": "08:00",
+      "hasta": "12:00",
+      "local": "Cartagena 1",
+      "cupo": 4,
+      "activo": true
+    },
+    {
+      "diaSemana": 3,
+      "jornada": "afternoon",
+      "desde": "13:00",
+      "hasta": "18:00",
+      "local": "Cartagena 1",
+      "cupo": 3,
+      "activo": true
+    },
+    {
+      "diaSemana": 4,
+      "jornada": "morning",
+      "desde": "08:00",
+      "hasta": "12:00",
+      "local": "Cartagena 1",
+      "cupo": 4,
+      "activo": true
+    },
+    {
+      "diaSemana": 4,
+      "jornada": "afternoon",
+      "desde": "13:00",
+      "hasta": "18:00",
+      "local": "Cartagena 1",
+      "cupo": 3,
+      "activo": true
+    },
+    {
+      "diaSemana": 5,
+      "jornada": "morning",
+      "desde": "08:00",
+      "hasta": "12:00",
+      "local": "Cartagena 1",
+      "cupo": 4,
+      "activo": true
+    },
+    {
+      "diaSemana": 5,
+      "jornada": "afternoon",
+      "desde": "13:00",
+      "hasta": "18:00",
+      "local": "Cartagena 1",
+      "cupo": 3,
+      "activo": true
+    },
+    {
+      "diaSemana": 6,
+      "jornada": "morning",
+      "desde": "08:00",
+      "hasta": "12:00",
+      "local": "Turbaco",
+      "cupo": 4,
+      "activo": true
+    }
+  ],
+  "clientes": [
+    {
+      "nombre": "Marta Ospina",
+      "telefono": "3124445566",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-28"
+    },
+    {
+      "nombre": "Jorge Pérez",
+      "telefono": "3001112233",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-27"
+    },
+    {
+      "nombre": "Rosaida Hernández",
+      "telefono": "3007771122",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-26"
+    },
+    {
+      "nombre": "Sofía Ríos",
+      "telefono": "3013334455",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-26"
+    },
+    {
+      "nombre": "Karol Giraldo",
+      "telefono": "3015558899",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-25"
+    },
+    {
+      "nombre": "Pedro Salas",
+      "telefono": "3009998877",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-25"
+    },
+    {
+      "nombre": "Hilda de Ávila",
+      "telefono": "3006532525",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-24"
+    },
+    {
+      "nombre": "Ana Beltrán",
+      "telefono": "3182223344",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-24"
+    },
+    {
+      "nombre": "Engerling Marrugo",
+      "telefono": "3012277629",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-23"
+    },
+    {
+      "nombre": "Luis Cárdenas",
+      "telefono": "3158889900",
+      "visitas": 1,
+      "ultimaVisita": "2026-11-23"
+    }
+  ],
+  "totalCitas": 10,
+  "dias": [
+    {
+      "fecha": "2026-11-23",
+      "cupos": [
+        {
+          "jornada": "morning",
+          "jornadaTexto": "Jornada mañana",
+          "desde": "08:00",
+          "hasta": "12:00",
+          "local": "Cartagena 1",
+          "cupo": 4,
+          "ocupados": 1,
+          "libres": 3
+        },
+        {
+          "jornada": "afternoon",
+          "jornadaTexto": "Jornada tarde",
+          "desde": "13:00",
+          "hasta": "18:00",
+          "local": "Cartagena 1",
+          "cupo": 3,
+          "ocupados": 0,
+          "libres": 3
+        }
+      ],
+      "citas": [
+        {
+          "id": "C-0001",
+          "hora": "08:00",
+          "cliente": "Engerling Marrugo",
+          "telefono": "3012277629",
+          "vehiculo": "galaxy 3",
+          "tipo": "maintenance",
+          "tipoTexto": "Mantenimiento",
+          "estado": "attended",
+          "estadoTexto": "Asistió",
+          "local": "Cartagena 1",
+          "monto": 240000,
+          "observaciones": "Prueba automática: todo bien."
+        },
+        {
+          "id": "C-0007",
+          "hora": "08:00",
+          "cliente": "Luis Cárdenas",
+          "telefono": "3158889900",
+          "vehiculo": "Ledo 3",
+          "tipo": "maintenance",
+          "tipoTexto": "Mantenimiento",
+          "estado": "no_show",
+          "estadoTexto": "No vino",
+          "local": "Cartagena 1",
+          "monto": null,
+          "observaciones": null
+        }
+      ]
+    },
+    {
+      "fecha": "2026-11-24",
+      "cupos": [
+        {
+          "jornada": "morning",
+          "jornadaTexto": "Jornada mañana",
+          "desde": "08:00",
+          "hasta": "12:00",
+          "local": "Cartagena 1",
+          "cupo": 4,
+          "ocupados": 1,
+          "libres": 3
+        },
+        {
+          "jornada": "afternoon",
+          "jornadaTexto": "Jornada tarde",
+          "desde": "13:00",
+          "hasta": "18:00",
+          "local": "Cartagena 1",
+          "cupo": 3,
+          "ocupados": 1,
+          "libres": 2
+        }
+      ],
+      "citas": [
+        {
+          "id": "C-0002",
+          "hora": "08:00",
+          "cliente": "Hilda de Ávila",
+          "telefono": "3006532525",
+          "vehiculo": "galaxy 3",
+          "tipo": "maintenance",
+          "tipoTexto": "Mantenimiento",
+          "estado": "to_confirm",
+          "estadoTexto": "Por confirmar",
+          "local": "Cartagena 1",
+          "monto": null,
+          "observaciones": null
+        },
+        {
+          "id": "C-0008",
+          "hora": "14:00",
+          "cliente": "Ana Beltrán",
+          "telefono": "3182223344",
+          "vehiculo": "galaxy 3",
+          "tipo": "warranty",
+          "tipoTexto": "Garantía",
+          "estado": "to_confirm",
+          "estadoTexto": "Por confirmar",
+          "local": "Cartagena 1",
+          "monto": null,
+          "observaciones": null
+        }
+      ]
+    },
+    {
+      "fecha": "2026-11-25",
+      "cupos": [
+        {
+          "jornada": "morning",
+          "jornadaTexto": "Jornada mañana",
+          "desde": "08:00",
+          "hasta": "12:00",
+          "local": "Cartagena 1",
+          "cupo": 4,
+          "ocupados": 0,
+          "libres": 4
+        },
+        {
+          "jornada": "afternoon",
+          "jornadaTexto": "Jornada tarde",
+          "desde": "13:00",
+          "hasta": "18:00",
+          "local": "Cartagena 1",
+          "cupo": 3,
+          "ocupados": 2,
+          "libres": 1
+        }
+      ],
+      "citas": [
+        {
+          "id": "C-0003",
+          "hora": "14:00",
+          "cliente": "Karol Giraldo",
+          "telefono": "3015558899",
+          "vehiculo": "stareer 3",
+          "tipo": "revision",
+          "tipoTexto": "Revisión",
+          "estado": "confirmed",
+          "estadoTexto": "Confirmada",
+          "local": "Cartagena 1",
+          "monto": null,
+          "observaciones": null
+        },
+        {
+          "id": "C-0009",
+          "hora": "14:00",
+          "cliente": "Pedro Salas",
+          "telefono": "3009998877",
+          "vehiculo": "stareer 3",
+          "tipo": "revision",
+          "tipoTexto": "Revisión",
+          "estado": "confirmed",
+          "estadoTexto": "Confirmada",
+          "local": "Cartagena 1",
+          "monto": null,
+          "observaciones": null
+        }
+      ]
+    },
+    {
+      "fecha": "2026-11-26",
+      "cupos": [
+        {
+          "jornada": "morning",
+          "jornadaTexto": "Jornada mañana",
+          "desde": "08:00",
+          "hasta": "12:00",
+          "local": "Cartagena 1",
+          "cupo": 4,
+          "ocupados": 1,
+          "libres": 3
+        },
+        {
+          "jornada": "afternoon",
+          "jornadaTexto": "Jornada tarde",
+          "desde": "13:00",
+          "hasta": "18:00",
+          "local": "Cartagena 1",
+          "cupo": 3,
+          "ocupados": 1,
+          "libres": 2
+        }
+      ],
+      "citas": [
+        {
+          "id": "C-000A",
+          "hora": "08:00",
+          "cliente": "Sofía Ríos",
+          "telefono": "3013334455",
+          "vehiculo": "Ledo 3",
+          "tipo": "maintenance",
+          "tipoTexto": "Mantenimiento",
+          "estado": "scheduled",
+          "estadoTexto": "Agendada",
+          "local": "Cartagena 1",
+          "monto": 220000,
+          "observaciones": null
+        },
+        {
+          "id": "C-0004",
+          "hora": "14:00",
+          "cliente": "Rosaida Hernández",
+          "telefono": "3007771122",
+          "vehiculo": "Ledo 3",
+          "tipo": "warranty",
+          "tipoTexto": "Garantía",
+          "estado": "scheduled",
+          "estadoTexto": "Agendada",
+          "local": "Cartagena 1",
+          "monto": null,
+          "observaciones": null
+        }
+      ]
+    },
+    {
+      "fecha": "2026-11-27",
+      "cupos": [
+        {
+          "jornada": "morning",
+          "jornadaTexto": "Jornada mañana",
+          "desde": "08:00",
+          "hasta": "12:00",
+          "local": "Cartagena 1",
+          "cupo": 4,
+          "ocupados": 1,
+          "libres": 3
+        },
+        {
+          "jornada": "afternoon",
+          "jornadaTexto": "Jornada tarde",
+          "desde": "13:00",
+          "hasta": "18:00",
+          "local": "Cartagena 1",
+          "cupo": 3,
+          "ocupados": 0,
+          "libres": 3
+        }
+      ],
+      "citas": [
+        {
+          "id": "C-0005",
+          "hora": "08:00",
+          "cliente": "Jorge Pérez",
+          "telefono": "3001112233",
+          "vehiculo": "galaxy 3",
+          "tipo": "maintenance",
+          "tipoTexto": "Mantenimiento",
+          "estado": "to_confirm",
+          "estadoTexto": "Por confirmar",
+          "local": "Cartagena 1",
+          "monto": 180000,
+          "observaciones": null
+        }
+      ]
+    },
+    {
+      "fecha": "2026-11-28",
+      "cupos": [
+        {
+          "jornada": "morning",
+          "jornadaTexto": "Jornada mañana",
+          "desde": "08:00",
+          "hasta": "12:00",
+          "local": "Turbaco",
+          "cupo": 4,
+          "ocupados": 0,
+          "libres": 4
+        }
+      ],
+      "citas": [
+        {
+          "id": "C-0006",
+          "hora": "14:00",
+          "cliente": "Marta Ospina",
+          "telefono": "3124445566",
+          "vehiculo": "stareer 3",
+          "tipo": "revision",
+          "tipoTexto": "Revisión",
+          "estado": "confirmed",
+          "estadoTexto": "Confirmada",
+          "local": null,
+          "monto": null,
+          "observaciones": null
+        }
+      ]
+    }
+  ],
+  "sinFecha": []
+}

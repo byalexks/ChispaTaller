@@ -693,7 +693,7 @@ export default function App() {
       )}
 
       {toast && (
-        <div className="fixed left-1/2 top-4 z-40 animate-toast -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white shadow-lg">
+        <div className="fixed left-1/2 top-24 z-40 animate-toast -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white shadow-lg">
           {toast}
         </div>
       )}

@@ -336,7 +336,9 @@ export async function clientsOfTechnician(id: string): Promise<TechnicianClient[
     const key = appointment.clientId ?? appointment.phone ?? normalize(appointment.name ?? "");
     if (!key) continue;
     const current = map.get(key);
-    const isUpcoming = Boolean(appointment.date && appointment.date >= today);
+    const isUpcoming = Boolean(
+      appointment.date && appointment.date >= today && OCCUPYING.has(appointment.status)
+    );
 
     if (current) {
       current.visits += 1;
