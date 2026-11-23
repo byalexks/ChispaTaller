@@ -3,8 +3,12 @@ import { parseMessage, splitMessages } from "./parser.js";
 import {
   appointmentsForDay,
   availabilityForDay,
+  clientsOfTechnician,
   closeAppointment,
+  createTechnician,
+  deleteTechnician,
   findMatch,
+  getAdminPin,
   getPhoto,
   getTechnician,
   historyForClient,
@@ -18,6 +22,7 @@ import {
   suggestLocationId,
   todayIso,
   updateScheduleBlock,
+  updateTechnician,
   weekOverview,
   windowOf,
 } from "./db";
@@ -36,6 +41,7 @@ import type {
   ScheduleBlock,
   ServiceType,
   Technician,
+  TechnicianClient,
 } from "./types";
 
 const STATUS_LABEL: Record<AppointmentStatus, string> = {
@@ -118,6 +124,8 @@ export default function App() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [visit, setVisit] = useState<Appointment | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dim">(() => {
@@ -258,8 +266,19 @@ export default function App() {
   if (booting) {
     return (
       <div className="flex min-h-full items-center justify-center text-sm text-muted">
-        Cargandoâ€¦
+        Cargando…
       </div>
+    );
+  }
+
+  if (adminUnlocked) {
+    return (
+      <AdminView
+        onClose={() => {
+          setAdminUnlocked(false);
+          void listTechnicians().then(setTechnicians);
+        }}
+      />
     );
   }
 
@@ -269,6 +288,8 @@ export default function App() {
         technicians={technicians}
         theme={theme}
         onToggleTheme={() => setTheme(theme === "dim" ? "light" : "dim")}
+        onAdminRequest={async (pin) => (await getAdminPin()) === pin}
+        onAdmin={() => setAdminUnlocked(true)}
         onLogin={(selected) => {
           localStorage.setItem("technicianId", selected.id);
           setTechnician(selected);
@@ -283,9 +304,9 @@ export default function App() {
         <div className="flex items-center justify-between">
           <button
             type="button"
-            onClick={switchTechnician}
+            onClick={() => setProfileOpen(true)}
             className="flex items-center gap-2 text-left"
-            title="Cambiar de técnico"
+            title="Mi perfil"
           >
             <span
               className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold text-white"
@@ -365,7 +386,7 @@ export default function App() {
             value={text}
             onChange={(event) => setText(event.target.value)}
             rows={7}
-            placeholder="PROGRAMACION DE MANTENIMIENTOâ€¦"
+            placeholder="PROGRAMACION DE MANTENIMIENTO…"
             className="w-full resize-none rounded-2xl border border-line bg-surface p-3 text-sm outline-none focus:border-brand"
           />
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -417,6 +438,20 @@ export default function App() {
             await refresh();
             setToast("Visita cerrada");
           }}
+        />
+      )}
+
+      {profileOpen && (
+        <ProfileSheet
+          technician={technician}
+          onClose={() => setProfileOpen(false)}
+          onSaved={async () => {
+            const updated = await getTechnician(technician.id);
+            if (updated) setTechnician(updated);
+            setProfileOpen(false);
+            setToast("Perfil actualizado");
+          }}
+          onLogout={switchTechnician}
         />
       )}
 
@@ -696,7 +731,7 @@ function ReviewSheet({
           onClick={onConfirm}
           className="h-12 rounded-xl bg-brand-solid text-sm font-semibold text-white active:scale-[0.99] disabled:opacity-50"
         >
-          {busy ? "Guardandoâ€¦" : "Confirmar"}
+          {busy ? "Guardando…" : "Confirmar"}
         </button>
       </div>
     </Sheet>
@@ -889,7 +924,7 @@ function SheetAction({
         <span className="block text-sm font-semibold">{title}</span>
         <span className="block text-[11px] text-muted">{hint}</span>
       </span>
-      <span className="text-lg text-muted">â€º</span>
+      <span className="text-lg text-muted">›</span>
     </button>
   );
 }
@@ -924,16 +959,22 @@ function Login({
   technicians,
   theme,
   onToggleTheme,
+  onAdminRequest,
+  onAdmin,
   onLogin,
 }: {
   technicians: Technician[];
   theme: "light" | "dim";
   onToggleTheme: () => void;
+  onAdminRequest: (pin: string) => Promise<boolean>;
+  onAdmin: () => void;
   onLogin: (technician: Technician) => void;
 }) {
   const [selected, setSelected] = useState<Technician | null>(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState(false);
+  const [adminMode, setAdminMode] = useState(false);
+  const [checking, setChecking] = useState(false);
 
   function submit(value: string) {
     if (!selected) return;
@@ -945,20 +986,72 @@ function Login({
     setPin("");
   }
 
+  async function submitAdmin(value: string) {
+    setChecking(true);
+    try {
+      if (await onAdminRequest(value)) {
+        onAdmin();
+        return;
+      }
+      setError(true);
+      setPin("");
+    } finally {
+      setChecking(false);
+    }
+  }
+
   return (
     <div className="relative mx-auto flex min-h-full w-full max-w-md flex-col justify-center px-6 py-10">
       <div className="absolute right-4 top-4">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
       </div>
+
       <div className="mb-8 text-center">
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-solid text-2xl font-bold text-white">
           A
         </div>
         <h1 className="text-2xl font-extrabold">Agenda</h1>
-        <p className="mt-1 text-sm text-muted">¿Quién está usando la agenda?</p>
+        <p className="mt-1 text-sm text-muted">
+          {adminMode ? "PIN de administrador" : "¿Quién está usando la agenda?"}
+        </p>
       </div>
 
-      {!selected ? (
+      {adminMode ? (
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setAdminMode(false);
+              setPin("");
+              setError(false);
+            }}
+            className="mb-4 text-xs font-semibold text-muted"
+          >
+            ‹ Volver
+          </button>
+          <input
+            autoFocus
+            value={pin}
+            onChange={(event) => {
+              const value = event.target.value.replace(/\D/g, "").slice(0, 4);
+              setPin(value);
+              setError(false);
+              if (value.length === 4) void submitAdmin(value);
+            }}
+            inputMode="numeric"
+            type="password"
+            placeholder="••••"
+            className={`mx-auto block w-40 rounded-xl border bg-surface px-4 py-3 text-center text-2xl tracking-[0.4em] outline-none ${
+              error ? "border-danger" : "border-line focus:border-brand"
+            }`}
+          />
+          {error && (
+            <p className="mt-2 text-center text-xs font-semibold text-danger">PIN incorrecto</p>
+          )}
+          {checking && <p className="mt-2 text-center text-xs text-muted">Verificando…</p>}
+          <p className="mt-6 text-center text-[11px] text-muted">PIN inicial: 9999</p>
+        </div>
+      ) : !selected ? (
         <div className="space-y-2">
           {technicians.map((technician) => (
             <button
@@ -978,9 +1071,21 @@ function Login({
                 {technician.name.trim().charAt(0).toUpperCase()}
               </span>
               <span className="flex-1 text-sm font-semibold">{technician.name}</span>
-              <span className="text-lg text-muted">â€º</span>
+              <span className="text-lg text-muted">›</span>
             </button>
           ))}
+
+          <button
+            type="button"
+            onClick={() => {
+              setAdminMode(true);
+              setPin("");
+              setError(false);
+            }}
+            className="mt-3 w-full rounded-2xl border border-dashed border-line px-4 py-3 text-xs font-semibold text-muted"
+          >
+            Administrar técnicos
+          </button>
         </div>
       ) : (
         <div>
@@ -993,7 +1098,7 @@ function Login({
             }}
             className="mb-4 text-xs font-semibold text-muted"
           >
-            â€¹ Volver
+            ‹ Volver
           </button>
           <p className="text-center text-sm font-semibold">{selected.name}</p>
           <p className="mt-1 text-center text-xs text-muted">PIN de 4 dígitos</p>
@@ -1008,7 +1113,7 @@ function Login({
             }}
             inputMode="numeric"
             type="password"
-            placeholder="â€¢â€¢â€¢â€¢"
+            placeholder="••••"
             className={`mx-auto mt-4 block w-40 rounded-xl border bg-surface px-4 py-3 text-center text-2xl tracking-[0.4em] outline-none ${
               error ? "border-danger" : "border-line focus:border-brand"
             }`}
@@ -1016,7 +1121,7 @@ function Login({
           {error && (
             <p className="mt-2 text-center text-xs font-semibold text-danger">PIN incorrecto</p>
           )}
-          <p className="mt-6 text-center text-[11px] text-muted">PIN inicial de prueba: 1234</p>
+          <p className="mt-6 text-center text-[11px] text-muted">PIN inicial del técnico: 1234</p>
         </div>
       )}
     </div>
@@ -1334,6 +1439,346 @@ function ScheduleSheet({
         Listo
       </button>
     </Sheet>
+  );
+}
+
+function ProfileSheet({
+  technician,
+  onClose,
+  onSaved,
+  onLogout,
+}: {
+  technician: Technician;
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+  onLogout: () => void;
+}) {
+  const [name, setName] = useState(technician.name);
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [repeatPin, setRepeatPin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setError(null);
+    if (name.trim().length < 2) {
+      setError("Escribí un nombre.");
+      return;
+    }
+
+    const wantsPin = newPin.length > 0 || repeatPin.length > 0;
+    if (wantsPin) {
+      if (currentPin !== technician.pin) {
+        setError("El PIN actual no coincide.");
+        return;
+      }
+      if (!/^\d{4}$/.test(newPin)) {
+        setError("El PIN nuevo debe tener 4 dígitos.");
+        return;
+      }
+      if (newPin !== repeatPin) {
+        setError("Los PIN nuevos no coinciden.");
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      await updateTechnician(technician.id, {
+        name: name.trim(),
+        ...(wantsPin ? { pin: newPin } : {}),
+      });
+      await onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Sheet title="Mi perfil" onClose={onClose}>
+      <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+        <label className="block">
+          <span className="text-xs font-semibold text-muted">Nombre</span>
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+          />
+        </label>
+
+        <div className="rounded-xl border border-line bg-surface p-3">
+          <p className="text-xs font-semibold">Cambiar PIN</p>
+          <input
+            value={currentPin}
+            onChange={(event) => setCurrentPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
+            placeholder="PIN actual"
+            inputMode="numeric"
+            type="password"
+            className="mt-2 w-full rounded-lg border border-line bg-canvas px-3 py-2 text-sm outline-none focus:border-brand"
+          />
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <input
+              value={newPin}
+              onChange={(event) => setNewPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="PIN nuevo"
+              inputMode="numeric"
+              type="password"
+              className="w-full rounded-lg border border-line bg-canvas px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <input
+              value={repeatPin}
+              onChange={(event) => setRepeatPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="Repetir PIN"
+              inputMode="numeric"
+              type="password"
+              className="w-full rounded-lg border border-line bg-canvas px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+          </div>
+        </div>
+
+        {error && <p className="rounded-lg bg-danger-soft px-2 py-1.5 text-xs text-danger">{error}</p>}
+
+        <button
+          type="button"
+          onClick={onLogout}
+          className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-semibold text-muted"
+        >
+          Cerrar sesión en este dispositivo
+        </button>
+      </div>
+
+      <button
+        type="button"
+        disabled={saving}
+        onClick={() => void save()}
+        className="mt-4 h-12 w-full rounded-xl bg-brand-solid text-sm font-semibold text-white disabled:opacity-50"
+      >
+        {saving ? "Guardando…" : "Guardar"}
+      </button>
+    </Sheet>
+  );
+}
+
+function AdminView({ onClose }: { onClose: () => void }) {
+  const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [sub, setSub] = useState<{ kind: "week" | "clients"; technician: Technician } | null>(
+    null
+  );
+  const [week, setWeek] = useState<DaySummary[]>([]);
+  const [clients, setClients] = useState<TechnicianClient[]>([]);
+  const [loadingSub, setLoadingSub] = useState(false);
+
+  const load = useCallback(async () => {
+    setTechnicians(await listTechnicians(true));
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function add() {
+    setError(null);
+    if (name.trim().length < 2) {
+      setError("Escribí el nombre del técnico.");
+      return;
+    }
+    if (!/^\d{4}$/.test(pin)) {
+      setError("El PIN debe tener 4 dígitos.");
+      return;
+    }
+    await createTechnician(name.trim(), pin);
+    setName("");
+    setPin("");
+    await load();
+  }
+
+  async function toggle(technician: Technician) {
+    await updateTechnician(technician.id, { active: !technician.active });
+    await load();
+  }
+
+  async function remove(technician: Technician) {
+    const result = await deleteTechnician(technician.id);
+    if (!result.ok) {
+      setError(
+        `${technician.name} tiene ${result.appointments} citas. Desactivalo en vez de borrarlo.`
+      );
+    } else {
+      setError(null);
+    }
+    await load();
+  }
+
+  async function openSub(kind: "week" | "clients", technician: Technician) {
+    setSub({ kind, technician });
+    setLoadingSub(true);
+    try {
+      if (kind === "week") setWeek(await weekOverview(todayIso(), technician.id));
+      else setClients(await clientsOfTechnician(technician.id));
+    } finally {
+      setLoadingSub(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto flex min-h-full w-full max-w-md flex-col">
+      <header className="sticky top-0 z-10 flex items-center justify-between bg-canvas/95 px-5 pb-3 pt-6 backdrop-blur">
+        <button type="button" onClick={onClose} className="text-xs font-semibold text-muted">
+          ‹ Volver
+        </button>
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-brand">
+          Administración
+        </p>
+        <span className="w-10" />
+      </header>
+
+      <main className="flex-1 space-y-4 px-5 pb-24">
+        <p className="rounded-xl bg-brand-soft px-3 py-2 text-[11px] text-brand">
+          Agregá, desactivá o borrá técnicos. Podés ver su calendario y sus clientes.
+        </p>
+
+        <section className="rounded-2xl border border-line bg-surface p-3">
+          <p className="text-xs font-semibold">Agregar técnico</p>
+          <div className="mt-2 space-y-2">
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Nombre"
+              className="w-full rounded-lg border border-line bg-canvas px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <input
+              value={pin}
+              onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="PIN de 4 dígitos"
+              inputMode="numeric"
+              className="w-full rounded-lg border border-line bg-canvas px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <button
+              type="button"
+              onClick={() => void add()}
+              className="h-10 w-full rounded-lg bg-brand-solid text-sm font-semibold text-white"
+            >
+              Agregar
+            </button>
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          {technicians.map((technician) => (
+            <article key={technician.id} className="rounded-2xl border border-line bg-surface p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                    style={{ backgroundColor: technician.color }}
+                  >
+                    {technician.name.trim().charAt(0).toUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{technician.name}</p>
+                    <p className="text-[10px] text-muted">
+                      {technician.active === false ? "Desactivado" : "Activo"} · PIN {technician.pin}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void toggle(technician)}
+                  className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold ${
+                    technician.active === false
+                      ? "bg-brand-soft text-brand"
+                      : "bg-canvas text-muted"
+                  }`}
+                >
+                  {technician.active === false ? "Activar" : "Desactivar"}
+                </button>
+              </div>
+
+              <div className="mt-2 grid grid-cols-3 gap-1">
+                <button
+                  type="button"
+                  onClick={() => void openSub("week", technician)}
+                  className="rounded-lg border border-line py-1.5 text-[10px] font-semibold text-muted"
+                >
+                  Calendario
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openSub("clients", technician)}
+                  className="rounded-lg border border-line py-1.5 text-[10px] font-semibold text-muted"
+                >
+                  Clientes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void remove(technician)}
+                  className="rounded-lg border border-danger/30 py-1.5 text-[10px] font-semibold text-danger"
+                >
+                  Eliminar
+                </button>
+              </div>
+            </article>
+          ))}
+        </section>
+
+        {error && <p className="rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">{error}</p>}
+      </main>
+
+      {sub && (
+        <Sheet
+          title={
+            sub.kind === "week"
+              ? `Semana · ${sub.technician.name}`
+              : `Clientes · ${sub.technician.name}`
+          }
+          onClose={() => setSub(null)}
+        >
+          {loadingSub ? (
+            <p className="text-sm text-muted">Cargando…</p>
+          ) : sub.kind === "week" ? (
+            <div className="max-h-[55vh] space-y-1 overflow-y-auto">
+              {week.map((day) => (
+                <div
+                  key={day.date}
+                  className="flex items-center justify-between rounded-lg bg-surface px-3 py-2 text-xs"
+                >
+                  <span className="capitalize">{formatShort(day.date)}</span>
+                  <span className="text-muted">
+                    {day.appointments} cita{day.appointments === 1 ? "" : "s"}
+                  </span>
+                  <span className="font-semibold">
+                    {day.free === 0 ? "Lleno" : `${day.free} libres`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : clients.length === 0 ? (
+            <p className="text-sm text-muted">Todavía no tiene clientes.</p>
+          ) : (
+            <div className="max-h-[55vh] space-y-1 overflow-y-auto">
+              {clients.map((client) => (
+                <div
+                  key={client.id}
+                  className="flex items-center justify-between rounded-lg bg-surface px-3 py-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{client.name}</p>
+                    <p className="text-[10px] text-muted">{client.phone ?? "sin teléfono"}</p>
+                  </div>
+                  <span className="shrink-0 text-muted">
+                    {client.visits} visita{client.visits === 1 ? "" : "s"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Sheet>
+      )}
+    </div>
   );
 }
 

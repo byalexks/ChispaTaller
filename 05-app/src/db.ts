@@ -13,13 +13,14 @@ import type {
   ScheduleBlock,
   ServiceType,
   Technician,
+  TechnicianClient,
   Vehicle,
   VisitPhoto,
   WindowKey,
 } from "./types";
 
 const DB_NAME = "agenda-servicio-tecnico";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 /** Statuses that consume a slot. */
 export const OCCUPYING = new Set(["scheduled", "to_confirm", "confirmed", "attended"]);
@@ -54,6 +55,7 @@ interface AgendaSchema extends DBSchema {
   };
   photos: { key: string; value: VisitPhoto };
   counters: { key: string; value: number };
+  settings: { key: string; value: string };
 }
 
 export type AgendaDB = IDBPDatabase<AgendaSchema>;
@@ -85,11 +87,9 @@ export function windowOf(type: ServiceType | null): WindowKey {
   return type === "maintenance" ? "morning" : "afternoon";
 }
 
-/** Placeholder roster until the client gives us real names and PINs. */
+/** One technician for now. Admin mode can add more. */
 const SEED_TECHNICIANS: Technician[] = [
-  { id: "tech-1", name: "Técnico 1", pin: "1234", color: "#0f5132" },
-  { id: "tech-2", name: "Técnico 2", pin: "1234", color: "#1d4ed8" },
-  { id: "tech-3", name: "Técnico 3", pin: "1234", color: "#b45309" },
+  { id: "tech-1", name: "Técnico", pin: "1234", color: "#0f5132", active: true },
 ];
 
 const SEED_LOCATIONS: Location[] = [
@@ -229,6 +229,9 @@ export function getDb(): Promise<AgendaDB> {
         if (!db.objectStoreNames.contains("counters")) {
           db.createObjectStore("counters");
         }
+        if (!db.objectStoreNames.contains("settings")) {
+          db.createObjectStore("settings");
+        }
       },
     }).then(async (db) => {
       await seedIfEmpty(db);
@@ -238,10 +241,95 @@ export function getDb(): Promise<AgendaDB> {
   return dbPromise;
 }
 
-export async function listTechnicians(): Promise<Technician[]> {
+export async function listTechnicians(includeInactive = false): Promise<Technician[]> {
   const db = await getDb();
   const items = await db.getAll("technicians");
-  return items.sort((a, b) => a.name.localeCompare(b.name));
+  const filtered = includeInactive ? items : items.filter((item) => item.active !== false);
+  return filtered.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function getAdminPin(): Promise<string> {
+  const db = await getDb();
+  return (await db.get("settings", "adminPin")) ?? "9999";
+}
+
+export async function setAdminPin(pin: string): Promise<void> {
+  const db = await getDb();
+  await db.put("settings", pin, "adminPin");
+}
+
+export async function createTechnician(name: string, pin: string): Promise<Technician> {
+  const db = await getDb();
+  const palette = ["#0f5132", "#1d4ed8", "#b45309", "#7e22ce", "#0e7490"];
+  const count = await db.count("technicians");
+  const technician: Technician = {
+    id: await nextId(db, "technicians", "T"),
+    name: name.trim(),
+    pin,
+    color: palette[count % palette.length],
+    active: true,
+  };
+  await db.put("technicians", technician);
+
+  const tx = db.transaction("schedule", "readwrite");
+  for (const block of seedSchedule(technician.id)) {
+    await tx.store.put(block);
+  }
+  await tx.done;
+
+  return technician;
+}
+
+export async function updateTechnician(
+  id: string,
+  patch: Partial<Pick<Technician, "name" | "pin" | "active" | "color">>
+): Promise<void> {
+  const db = await getDb();
+  const technician = await db.get("technicians", id);
+  if (!technician) return;
+  await db.put("technicians", { ...technician, ...patch });
+}
+
+export async function deleteTechnician(
+  id: string
+): Promise<{ ok: boolean; appointments: number }> {
+  const db = await getDb();
+  const appointments = await db.getAllFromIndex("appointments", "byTechnician", id);
+  if (appointments.length) return { ok: false, appointments: appointments.length };
+
+  const blocks = await db.getAllFromIndex("schedule", "byTechnician", id);
+  const tx = db.transaction("schedule", "readwrite");
+  for (const block of blocks) {
+    await tx.store.delete(block.id);
+  }
+  await tx.done;
+
+  await db.delete("technicians", id);
+  return { ok: true, appointments: 0 };
+}
+
+export async function clientsOfTechnician(id: string): Promise<TechnicianClient[]> {
+  const db = await getDb();
+  const appointments = await db.getAllFromIndex("appointments", "byTechnician", id);
+  const map = new Map<string, TechnicianClient>();
+
+  for (const appointment of appointments) {
+    const key = appointment.phone ?? normalize(appointment.name ?? "");
+    if (!key) continue;
+    const current = map.get(key);
+    if (current) {
+      current.visits += 1;
+    } else {
+      map.set(key, {
+        id: key,
+        name: appointment.name ?? "Sin nombre",
+        phone: appointment.phone ?? null,
+        visits: 1,
+      });
+    }
+  }
+
+  return [...map.values()].sort((a, b) => b.visits - a.visits);
 }
 
 export async function getTechnician(id: string): Promise<Technician | undefined> {

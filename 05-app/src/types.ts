@@ -93,6 +93,14 @@ export interface Technician {
   name: string;
   pin: string;
   color: string;
+  active: boolean;
+}
+
+export interface TechnicianClient {
+  id: string;
+  name: string;
+  phone: string | null;
+  visits: number;
 }
 
 export interface Client {
