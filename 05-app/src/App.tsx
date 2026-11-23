@@ -267,19 +267,23 @@ export default function App() {
 
   async function exportWeek() {
     if (!technician || week.length === 0) return;
+    const from = week[0].date;
     const places = await listLocations(true);
     const place = new Map(places.map((location) => [location.id, location.name]));
     const days = [];
 
-    for (const day of week) {
+    // The 7 days on screen plus the next 7, in one file.
+    for (let offset = 0; offset < 14; offset += 1) {
+      const date = isoWithOffset(from, offset);
       const [appointments, availability] = await Promise.all([
-        appointmentsForDay(day.date, technician.id),
-        availabilityForDay(day.date, technician.id),
+        appointmentsForDay(date, technician.id),
+        availabilityForDay(date, technician.id),
       ]);
       days.push({
-        fecha: day.date,
+        fecha: date,
         cupos: availability.map((block) => ({
           jornada: block.window,
+          jornadaTexto: WINDOW_LABEL[block.window],
           desde: block.from,
           hasta: block.to,
           local: block.locationName,
@@ -294,7 +298,9 @@ export default function App() {
           telefono: appointment.phone,
           vehiculo: appointment.model,
           tipo: appointment.type,
+          tipoTexto: appointment.type ? TYPE_LABEL[appointment.type] : null,
           estado: appointment.status,
+          estadoTexto: STATUS_LABEL[appointment.status],
           local: appointment.locationId ? place.get(appointment.locationId) ?? null : null,
           monto: appointment.amount,
           observaciones: appointment.notes,
@@ -302,11 +308,11 @@ export default function App() {
       });
     }
 
-    downloadJson(`semana-${week[0].date}.json`, {
+    downloadJson(`agenda-${from}-14dias.json`, {
       generadoEn: new Date().toISOString(),
       tecnico: technician.name,
-      desde: week[0].date,
-      hasta: week[week.length - 1].date,
+      desde: from,
+      hasta: isoWithOffset(from, 13),
       dias: days,
     });
   }
@@ -943,7 +949,7 @@ function WeekView({
             <path d="M7 10l5 5 5-5" />
             <path d="M5 21h14" />
           </svg>
-          Descargar semana (JSON)
+          Descargar 14 días (JSON)
         </button>
       </div>
 
