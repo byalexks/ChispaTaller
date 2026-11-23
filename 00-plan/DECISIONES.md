@@ -1,5 +1,11 @@
 # Registro de decisiones
 
+## Foco actual
+
+> **Solo la rama del técnico (Chispa Taller).** La rama Excel / Google Sheets queda
+> **fuera de alcance** hasta que el usuario lo pida explícitamente. No proponer
+> sincronización con la hoja ni retomar la hoja sin instrucción.
+
 Formato: fecha · decisión · estado · motivo.
 
 ## Cerradas

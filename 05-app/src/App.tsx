@@ -539,6 +539,7 @@ export default function App() {
       {visit && (
         <VisitSheet
           appointment={visit}
+          locations={locations}
           onClose={() => setVisit(null)}
           onSaved={async () => {
             setVisit(null);
@@ -1374,10 +1375,12 @@ const WEEKDAY_LABEL = [
 
 function VisitSheet({
   appointment,
+  locations,
   onClose,
   onSaved,
 }: {
   appointment: Appointment;
+  locations: Location[];
   onClose: () => void;
   onSaved: () => Promise<void> | void;
 }) {
@@ -1452,6 +1455,38 @@ function VisitSheet({
           </p>
           <p className="mt-1 font-mono text-[10px] text-muted">#{appointment.id}</p>
         </div>
+
+        {appointment.phone && (() => {
+          const place = locations.find((item) => item.id === appointment.locationId)?.name;
+          const firstName = (appointment.name ?? "").split(" ")[0] ?? "";
+          const when = [
+            appointment.date ? formatLong(appointment.date) : null,
+            appointment.time,
+          ]
+            .filter(Boolean)
+            .join(" a las ");
+          const text = `Hola ${firstName}, le confirmo su cita${when ? ` del ${when}` : ""}${
+            place ? ` en ${place}` : ""
+          }.`;
+          return (
+            <div className="grid grid-cols-2 gap-2">
+              <a
+                href={`tel:+57${appointment.phone}`}
+                className="grid h-10 place-items-center rounded-xl border border-line bg-surface text-xs font-semibold text-ink"
+              >
+                Llamar
+              </a>
+              <a
+                href={`https://wa.me/57${appointment.phone}?text=${encodeURIComponent(text)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="grid h-10 place-items-center rounded-xl bg-brand-soft text-xs font-semibold text-brand"
+              >
+                Confirmar por WhatsApp
+              </a>
+            </div>
+          );
+        })()}
 
         <label className="flex h-32 w-full cursor-pointer items-center justify-center overflow-hidden rounded-2xl border border-dashed border-line bg-surface text-center">
           {photoUrl ? (

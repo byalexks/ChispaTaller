@@ -3,6 +3,9 @@
 Agenda de visitas técnicas (mantenimiento, revisión, garantía, repuesto) para un
 negocio con 6 locales: 5 en Cartagena y 1 en Turbaco.
 
+> **Foco actual:** solo el producto del técnico (**Chispa Taller**, PWA). La rama
+> Excel / Google Sheets está **parqueada** y no se toca hasta que se pida.
+
 Dos ramas, una construida y otra parqueada:
 
 - **Rama trabajador (en construcción):** sitio web instalable como PWA. El técnico
