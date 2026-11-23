@@ -2,6 +2,7 @@
 import { parseMessage, splitMessages } from "./parser.js";
 import {
   allAppointmentsForDay,
+  allAppointmentsOfTechnician,
   appointmentsForDay,
   availabilityForDay,
   clearTechnicianData,
@@ -266,19 +267,45 @@ export default function App() {
   }
 
   async function exportWeek() {
-    if (!technician || week.length === 0) return;
-    const from = week[0].date;
-    const places = await listLocations(true);
+    if (!technician) return;
+
+    const [appointments, schedule, clients, places] = await Promise.all([
+      allAppointmentsOfTechnician(technician.id),
+      listSchedule(technician.id),
+      clientsOfTechnician(technician.id),
+      listLocations(true),
+    ]);
+
     const place = new Map(places.map((location) => [location.id, location.name]));
+
+    const mapAppointment = (appointment: Appointment) => ({
+      id: appointment.id,
+      hora: appointment.time,
+      cliente: appointment.name,
+      telefono: appointment.phone,
+      vehiculo: appointment.model,
+      tipo: appointment.type,
+      tipoTexto: appointment.type ? TYPE_LABEL[appointment.type] : null,
+      estado: appointment.status,
+      estadoTexto: STATUS_LABEL[appointment.status],
+      local: appointment.locationId ? place.get(appointment.locationId) ?? null : null,
+      monto: appointment.amount,
+      observaciones: appointment.notes,
+    });
+
+    const grouped = new Map<string, Appointment[]>();
+    for (const appointment of appointments) {
+      const key = appointment.date ?? "";
+      const list = grouped.get(key) ?? [];
+      list.push(appointment);
+      grouped.set(key, list);
+    }
+
+    const dates = [...grouped.keys()].filter(Boolean).sort();
     const days = [];
 
-    // The 7 days on screen plus the next 7, in one file.
-    for (let offset = 0; offset < 14; offset += 1) {
-      const date = isoWithOffset(from, offset);
-      const [appointments, availability] = await Promise.all([
-        appointmentsForDay(date, technician.id),
-        availabilityForDay(date, technician.id),
-      ]);
+    for (const date of dates) {
+      const availability = await availabilityForDay(date, technician.id);
       days.push({
         fecha: date,
         cupos: availability.map((block) => ({
@@ -291,29 +318,39 @@ export default function App() {
           ocupados: block.occupied,
           libres: block.free,
         })),
-        citas: appointments.map((appointment) => ({
-          id: appointment.id,
-          hora: appointment.time,
-          cliente: appointment.name,
-          telefono: appointment.phone,
-          vehiculo: appointment.model,
-          tipo: appointment.type,
-          tipoTexto: appointment.type ? TYPE_LABEL[appointment.type] : null,
-          estado: appointment.status,
-          estadoTexto: STATUS_LABEL[appointment.status],
-          local: appointment.locationId ? place.get(appointment.locationId) ?? null : null,
-          monto: appointment.amount,
-          observaciones: appointment.notes,
-        })),
+        citas: (grouped.get(date) ?? [])
+          .sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""))
+          .map(mapAppointment),
       });
     }
 
-    downloadJson(`agenda-${from}-14dias.json`, {
+    downloadJson(`agenda-completa-${todayIso()}.json`, {
       generadoEn: new Date().toISOString(),
-      tecnico: technician.name,
-      desde: from,
-      hasta: isoWithOffset(from, 13),
+      tecnico: { id: technician.id, nombre: technician.name },
+      locales: places.map((location) => ({
+        id: location.id,
+        nombre: location.name,
+        ciudad: location.city,
+        activo: location.active !== false,
+      })),
+      horario: schedule.map((block) => ({
+        diaSemana: block.weekday,
+        jornada: block.window,
+        desde: block.from,
+        hasta: block.to,
+        local: place.get(block.locationId) ?? null,
+        cupo: block.capacity,
+        activo: block.active,
+      })),
+      clientes: clients.map((client) => ({
+        nombre: client.name,
+        telefono: client.phone,
+        visitas: client.visits,
+        ultimaVisita: client.lastDate,
+      })),
+      totalCitas: appointments.length,
       dias: days,
+      sinFecha: (grouped.get("") ?? []).map(mapAppointment),
     });
   }
 
@@ -949,7 +986,7 @@ function WeekView({
             <path d="M7 10l5 5 5-5" />
             <path d="M5 21h14" />
           </svg>
-          Descargar 14 días (JSON)
+          Descargar todo (JSON)
         </button>
       </div>
 

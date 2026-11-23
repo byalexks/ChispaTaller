@@ -735,6 +735,13 @@ export async function clearTechnicianData(technicianId: string): Promise<number>
   return appointments.length;
 }
 
+export async function allAppointmentsOfTechnician(
+  technicianId: string
+): Promise<Appointment[]> {
+  const db = await getDb();
+  return db.getAllFromIndex("appointments", "byTechnician", technicianId);
+}
+
 export async function allAppointmentsForDay(date: string): Promise<Appointment[]> {
   const db = await getDb();
   const items = await db.getAllFromIndex("appointments", "byDate", date);
