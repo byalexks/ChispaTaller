@@ -37,6 +37,7 @@ import {
 } from "./db";
 import { compressPhoto } from "./images";
 import { exportBackup, importBackup } from "./backup";
+import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
 import type {
   Alert,
   Appointment,
@@ -1136,29 +1137,75 @@ function Login({
 }) {
   const [selected, setSelected] = useState<Technician | null>(null);
   const [pin, setPin] = useState("");
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [adminMode, setAdminMode] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [lockedUntil, setLockedUntil] = useState(0);
+  const [remaining, setRemaining] = useState(0);
+
+  useEffect(() => {
+    if (!lockedUntil) {
+      setRemaining(0);
+      return;
+    }
+    const tick = () => {
+      const left = lockedUntil - Date.now();
+      if (left <= 0) {
+        setLockedUntil(0);
+        setRemaining(0);
+        setError(null);
+      } else {
+        setRemaining(Math.ceil(left / 1000));
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [lockedUntil]);
+
+  function guard(): boolean {
+    const identity = adminMode ? "admin" : selected?.id ?? "";
+    const left = lockRemaining(identity);
+    if (left > 0) {
+      setLockedUntil(Date.now() + left);
+      return false;
+    }
+    return true;
+  }
+
+  function fail(identity: string) {
+    const until = registerFailure(identity);
+    setPin("");
+    if (until) {
+      setLockedUntil(until);
+      setError(null);
+    } else if (attemptsLeft(identity) === 0) {
+      setError("PIN incorrecto. Un intento más y se bloquea 1 minuto.");
+    } else {
+      setError(`PIN incorrecto. Te quedan ${attemptsLeft(identity)} intentos.`);
+    }
+  }
 
   function submit(value: string) {
-    if (!selected) return;
+    if (!selected || !guard()) return;
     if (value === selected.pin) {
+      clearFailures(selected.id);
       onLogin(selected);
       return;
     }
-    setError(true);
-    setPin("");
+    fail(selected.id);
   }
 
   async function submitAdmin(value: string) {
+    if (!guard()) return;
     setChecking(true);
     try {
       if (await onAdminRequest(value)) {
+        clearFailures("admin");
         onAdmin();
         return;
       }
-      setError(true);
-      setPin("");
+      fail("admin");
     } finally {
       setChecking(false);
     }
@@ -1187,7 +1234,7 @@ function Login({
             onClick={() => {
               setAdminMode(false);
               setPin("");
-              setError(false);
+              setError(null);
             }}
             className="mb-4 text-xs font-semibold text-muted"
           >
@@ -1199,18 +1246,23 @@ function Login({
             onChange={(event) => {
               const value = event.target.value.replace(/\D/g, "").slice(0, 4);
               setPin(value);
-              setError(false);
+              setError(null);
               if (value.length === 4) void submitAdmin(value);
             }}
             inputMode="numeric"
             type="password"
+            disabled={remaining > 0}
             placeholder="••••"
             className={`mx-auto block w-40 rounded-xl border bg-surface px-4 py-3 text-center text-2xl tracking-[0.4em] outline-none ${
               error ? "border-danger" : "border-line focus:border-brand"
             }`}
           />
-          {error && (
-            <p className="mt-2 text-center text-xs font-semibold text-danger">PIN incorrecto</p>
+          {remaining > 0 ? (
+            <p className="mt-2 text-center text-xs font-semibold text-danger">
+              Demasiados intentos. Esperá {remaining} s.
+            </p>
+          ) : (
+            error && <p className="mt-2 text-center text-xs font-semibold text-danger">{error}</p>
           )}
           {checking && <p className="mt-2 text-center text-xs text-muted">Verificando…</p>}
           <p className="mt-6 text-center text-[11px] text-muted">PIN inicial: 9999</p>
@@ -1224,7 +1276,7 @@ function Login({
               onClick={() => {
                 setSelected(technician);
                 setPin("");
-                setError(false);
+                setError(null);
               }}
               className="flex w-full items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3 text-left active:scale-[0.99]"
             >
@@ -1244,7 +1296,7 @@ function Login({
             onClick={() => {
               setAdminMode(true);
               setPin("");
-              setError(false);
+              setError(null);
             }}
             className="mt-3 w-full rounded-2xl border border-dashed border-line px-4 py-3 text-xs font-semibold text-muted"
           >
@@ -1258,7 +1310,7 @@ function Login({
             onClick={() => {
               setSelected(null);
               setPin("");
-              setError(false);
+              setError(null);
             }}
             className="mb-4 text-xs font-semibold text-muted"
           >
@@ -1272,18 +1324,23 @@ function Login({
             onChange={(event) => {
               const value = event.target.value.replace(/\D/g, "").slice(0, 4);
               setPin(value);
-              setError(false);
+              setError(null);
               if (value.length === 4) submit(value);
             }}
             inputMode="numeric"
             type="password"
+            disabled={remaining > 0}
             placeholder="••••"
             className={`mx-auto mt-4 block w-40 rounded-xl border bg-surface px-4 py-3 text-center text-2xl tracking-[0.4em] outline-none ${
               error ? "border-danger" : "border-line focus:border-brand"
             }`}
           />
-          {error && (
-            <p className="mt-2 text-center text-xs font-semibold text-danger">PIN incorrecto</p>
+          {remaining > 0 ? (
+            <p className="mt-2 text-center text-xs font-semibold text-danger">
+              Demasiados intentos. Esperá {remaining} s.
+            </p>
+          ) : (
+            error && <p className="mt-2 text-center text-xs font-semibold text-danger">{error}</p>
           )}
           <p className="mt-6 text-center text-[11px] text-muted">PIN inicial del técnico: 1234</p>
         </div>

@@ -16,9 +16,10 @@ Dos ramas, una construida y otra parqueada:
 - [x] Plantillas reales de WhatsApp como corpus de prueba
 - [x] Parser determinista (sin IA) — 10/10 pruebas
 - [x] Login simple por técnico (nombre + PIN)
-- [x] Hoy, Bandeja, Semana, pegar, revisión, cierre de visita, horario
+- [x] Hoy, Bandeja, Semana, Clientes, pegar, revisión, cierre de visita, horario
+- [x] Administración de técnicos con datos de prueba y doble confirmación
+- [x] Respaldo: exportar e importar (incluye fotos)
 - [x] Modo oscuro "dim" (gris, no negro)
-- [ ] Fotos de evidencia en el respaldo
 - [ ] Sincronización entre dispositivos (hoy es local: IndexedDB)
 - [ ] Rama Excel
 
