@@ -789,6 +789,34 @@ export async function historyForClient(clientId: string): Promise<Appointment[]>
   return items.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
 }
 
+export async function setAppointmentStatus(
+  id: string,
+  status: AppointmentStatus
+): Promise<void> {
+  const db = await getDb();
+  const appointment = await db.get("appointments", id);
+  if (!appointment) return;
+  await db.put("appointments", {
+    ...appointment,
+    status,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function rescheduleAppointment(id: string, date: string): Promise<void> {
+  const db = await getDb();
+  const appointment = await db.get("appointments", id);
+  if (!appointment) return;
+  const [year, month, day] = date.split("-").map(Number);
+  await db.put("appointments", {
+    ...appointment,
+    date,
+    weekday: new Date(year, month - 1, day).getDay(),
+    status: "scheduled",
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export async function closeAppointment(
   id: string,
   data: {

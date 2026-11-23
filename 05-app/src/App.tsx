@@ -21,9 +21,12 @@ import {
   listLocations,
   listSchedule,
   listTechnicians,
+  rescheduleAppointment,
   resolveLocationText,
   saveDrafts,
   seedDemoData,
+  setAdminPin,
+  setAppointmentStatus,
   suggestLocationId,
   todayIso,
   updateScheduleBlock,
@@ -33,6 +36,7 @@ import {
   windowOf,
 } from "./db";
 import { compressPhoto } from "./images";
+import { exportBackup, importBackup } from "./backup";
 import type {
   Alert,
   Appointment,
@@ -1330,6 +1334,8 @@ function VisitSheet({
   const [history, setHistory] = useState<Appointment[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [newDate, setNewDate] = useState(appointment.date ?? todayIso());
 
   useEffect(() => {
     let url: string | null = null;
@@ -1435,6 +1441,45 @@ function VisitSheet({
             </button>
           </div>
         </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              void setAppointmentStatus(appointment.id, "confirmed").then(onSaved);
+            }}
+            className="h-10 rounded-xl border border-line bg-surface text-xs font-semibold text-brand"
+          >
+            Confirmar cita
+          </button>
+          <button
+            type="button"
+            onClick={() => setMoving((value) => !value)}
+            className="h-10 rounded-xl border border-line bg-surface text-xs font-semibold text-muted"
+          >
+            Reprogramar
+          </button>
+        </div>
+
+        {moving && (
+          <div className="flex items-center gap-2 rounded-xl border border-line bg-surface p-2">
+            <input
+              type="date"
+              value={newDate}
+              onChange={(event) => setNewDate(event.target.value)}
+              className="flex-1 rounded-lg border border-line bg-canvas px-2 py-1.5 text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                void rescheduleAppointment(appointment.id, newDate).then(onSaved);
+              }}
+              className="h-8 rounded-lg bg-brand-solid px-3 text-xs font-semibold text-white"
+            >
+              Mover
+            </button>
+          </div>
+        )}
 
         <textarea
           value={notes}
@@ -1619,6 +1664,17 @@ function ProfileSheet({
   const [repeatPin, setRepeatPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [pendingImport, setPendingImport] = useState<File | null>(null);
+
+  async function handleExport() {
+    const blob = await exportBackup();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `agenda-respaldo-${todayIso()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   async function save() {
     setError(null);
@@ -1697,6 +1753,35 @@ function ProfileSheet({
           </div>
         </div>
 
+        <div className="rounded-xl border border-line bg-surface p-3">
+          <p className="text-xs font-semibold">Respaldo</p>
+          <p className="mt-1 text-[10px] text-muted">
+            Los datos viven solo en este dispositivo. Exportá un archivo para no perderlos.
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => void handleExport()}
+              className="h-10 rounded-lg border border-line bg-canvas text-xs font-semibold text-brand"
+            >
+              Exportar
+            </button>
+            <label className="grid h-10 cursor-pointer place-items-center rounded-lg border border-line bg-canvas text-xs font-semibold text-muted">
+              Importar
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) setPendingImport(file);
+                }}
+              />
+            </label>
+          </div>
+        </div>
+
         {error && <p className="rounded-lg bg-danger-soft px-2 py-1.5 text-xs text-danger">{error}</p>}
 
         <button
@@ -1716,6 +1801,21 @@ function ProfileSheet({
       >
         {saving ? "Guardando…" : "Guardar"}
       </button>
+
+      {pendingImport && (
+        <ConfirmSheet
+          title="Importar respaldo"
+          body="Se reemplazan TODOS los datos de este dispositivo con los del archivo. No se puede deshacer."
+          confirmLabel="Importar"
+          danger
+          onCancel={() => setPendingImport(null)}
+          onConfirm={() => {
+            const file = pendingImport;
+            setPendingImport(null);
+            void importBackup(file).then(() => window.location.reload());
+          }}
+        />
+      )}
     </Sheet>
   );
 }
@@ -1732,6 +1832,11 @@ function AdminView({ onClose }: { onClose: () => void }) {
   const [clients, setClients] = useState<TechnicianClient[]>([]);
   const [loadingSub, setLoadingSub] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [adminPin, setAdminPinValue] = useState("");
+  const [adminCurrent, setAdminCurrent] = useState("");
+  const [adminNew, setAdminNew] = useState("");
+  const [adminRepeat, setAdminRepeat] = useState("");
+  const [adminError, setAdminError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{
     title: string;
     body: string;
@@ -1743,6 +1848,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
   const load = useCallback(async () => {
     const list = await listTechnicians(true);
     setTechnicians(list);
+    setAdminPinValue(await getAdminPin());
     const entries = await Promise.all(
       list.map(async (technician) => [technician.id, await countAppointments(technician.id)] as const)
     );
@@ -1828,6 +1934,34 @@ function AdminView({ onClose }: { onClose: () => void }) {
     });
   }
 
+  function changeAdminPin() {
+    if (adminCurrent !== adminPin) {
+      setAdminError("El PIN actual no coincide.");
+      return;
+    }
+    if (!/^\d{4}$/.test(adminNew)) {
+      setAdminError("El PIN nuevo debe tener 4 dígitos.");
+      return;
+    }
+    if (adminNew !== adminRepeat) {
+      setAdminError("Los PIN nuevos no coinciden.");
+      return;
+    }
+    setConfirm({
+      title: "Cambiar PIN de administrador",
+      body: "El próximo acceso a administración va a usar el PIN nuevo.",
+      confirmLabel: "Cambiar",
+      run: async () => {
+        await setAdminPin(adminNew);
+        setAdminPinValue(adminNew);
+        setAdminCurrent("");
+        setAdminNew("");
+        setAdminRepeat("");
+        setAdminError(null);
+      },
+    });
+  }
+
   async function openSub(kind: "week" | "clients", technician: Technician) {
     setSub({ kind, technician });
     setLoadingSub(true);
@@ -1880,6 +2014,49 @@ function AdminView({ onClose }: { onClose: () => void }) {
               Agregar
             </button>
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-line bg-surface p-3">
+          <p className="text-xs font-semibold">PIN de administrador</p>
+          <p className="mt-1 text-[10px] text-muted">Actual: {adminPin}</p>
+          <div className="mt-2 grid grid-cols-3 gap-1">
+            <input
+              value={adminCurrent}
+              onChange={(event) =>
+                setAdminCurrent(event.target.value.replace(/\D/g, "").slice(0, 4))
+              }
+              placeholder="Actual"
+              inputMode="numeric"
+              type="password"
+              className="w-full rounded-lg border border-line bg-canvas px-2 py-2 text-xs"
+            />
+            <input
+              value={adminNew}
+              onChange={(event) => setAdminNew(event.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="Nuevo"
+              inputMode="numeric"
+              type="password"
+              className="w-full rounded-lg border border-line bg-canvas px-2 py-2 text-xs"
+            />
+            <input
+              value={adminRepeat}
+              onChange={(event) =>
+                setAdminRepeat(event.target.value.replace(/\D/g, "").slice(0, 4))
+              }
+              placeholder="Repetir"
+              inputMode="numeric"
+              type="password"
+              className="w-full rounded-lg border border-line bg-canvas px-2 py-2 text-xs"
+            />
+          </div>
+          {adminError && <p className="mt-1 text-[10px] text-danger">{adminError}</p>}
+          <button
+            type="button"
+            onClick={changeAdminPin}
+            className="mt-2 h-9 w-full rounded-lg border border-line text-xs font-semibold text-muted"
+          >
+            Cambiar PIN de administrador
+          </button>
         </section>
 
         <section className="space-y-2">
