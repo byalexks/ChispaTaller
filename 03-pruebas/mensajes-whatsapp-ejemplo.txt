@@ -1,0 +1,35 @@
+Mensajes reales de WhatsApp para probar el diseño
+================================================
+
+Pegue aquí 10 a 20 mensajes tal como llegan, sin corregir. Este es el insumo más
+valioso del proyecto: con ellos se define qué columnas hacen falta y qué casos
+borde existen.
+
+Formato sugerido (una entrada por bloque):
+
+--- 1
+Fecha del mensaje: 2026-11-20
+Quién lo envía: asesora / cliente / grupo
+Local:
+Texto tal como llega:
+  <pegar aquí>
+Qué debería entender el sistema:
+  Persona: 
+  Vehículo / serial / modelo:
+  Servicio:
+  Fecha pedida:
+  Pago o gratuito:
+  Qué es ambiguo:
+
+---
+
+Casos que hay que conseguir sí o sí:
+
+- [ ] Un mensaje con fecha escrita a mano ("miércoles 20") que esté mal.
+- [ ] Un mensaje con varias personas en el mismo texto.
+- [ ] Una reprogramación ("cambiar para el jueves").
+- [ ] Una cancelación.
+- [ ] Una garantía o cambio de repuesto.
+- [ ] Un mensaje sin serial ni modelo.
+- [ ] Un mensaje con audio (transcrito por WhatsApp).
+- [ ] Un mensaje que pida dos servicios el mismo día.

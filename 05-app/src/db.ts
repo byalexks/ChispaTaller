@@ -1,0 +1,661 @@
+import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import { normalize } from "./dates.js";
+import type {
+  Appointment,
+  AppointmentStatus,
+  AvailabilityBlock,
+  Client,
+  DaySummary,
+  Draft,
+  DraftMode,
+  InboxMessage,
+  Location,
+  ScheduleBlock,
+  ServiceType,
+  Technician,
+  Vehicle,
+  VisitPhoto,
+  WindowKey,
+} from "./types";
+
+const DB_NAME = "agenda-servicio-tecnico";
+const DB_VERSION = 5;
+
+/** Statuses that consume a slot. */
+export const OCCUPYING = new Set(["scheduled", "to_confirm", "confirmed", "attended"]);
+
+interface AgendaSchema extends DBSchema {
+  technicians: { key: string; value: Technician };
+  appointments: {
+    key: string;
+    value: Appointment;
+    indexes: { byDate: string; byClient: string; byTechnician: string };
+  };
+  clients: {
+    key: string;
+    value: Client;
+    indexes: { byName: string; byPhone: string };
+  };
+  vehicles: {
+    key: string;
+    value: Vehicle;
+    indexes: { byClient: string };
+  };
+  locations: { key: string; value: Location };
+  schedule: {
+    key: string;
+    value: ScheduleBlock;
+    indexes: { byWeekday: number; byTechnician: string };
+  };
+  messages: {
+    key: string;
+    value: InboxMessage;
+    indexes: { byInbox: number };
+  };
+  photos: { key: string; value: VisitPhoto };
+  counters: { key: string; value: number };
+}
+
+export type AgendaDB = IDBPDatabase<AgendaSchema>;
+
+let dbPromise: Promise<AgendaDB> | null = null;
+let seedChecked = false;
+
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+export function todayIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+export function isoWithOffset(baseIso: string, days: number): string {
+  const [year, month, day] = baseIso.split("-").map(Number);
+  const date = new Date(year, month - 1, day + days);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export function weekdayOf(iso: string): number {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year, month - 1, day).getDay();
+}
+
+export function windowOf(type: ServiceType | null): WindowKey {
+  return type === "maintenance" ? "morning" : "afternoon";
+}
+
+/** Placeholder roster until the client gives us real names and PINs. */
+const SEED_TECHNICIANS: Technician[] = [
+  { id: "tech-1", name: "Técnico 1", pin: "1234", color: "#0f5132" },
+  { id: "tech-2", name: "Técnico 2", pin: "1234", color: "#1d4ed8" },
+  { id: "tech-3", name: "Técnico 3", pin: "1234", color: "#b45309" },
+];
+
+const SEED_LOCATIONS: Location[] = [
+  { id: "cartagena-1", name: "Cartagena 1", city: "Cartagena", aliases: [] },
+  { id: "cartagena-2", name: "Cartagena 2", city: "Cartagena", aliases: [] },
+  { id: "cartagena-3", name: "Cartagena 3", city: "Cartagena", aliases: [] },
+  { id: "cartagena-4", name: "Cartagena 4", city: "Cartagena", aliases: [] },
+  { id: "cartagena-5", name: "Cartagena 5", city: "Cartagena", aliases: [] },
+  { id: "turbaco", name: "Turbaco", city: "Turbaco", aliases: [] },
+];
+
+/** Placeholder schedule: same shape for every technician until they configure theirs. */
+function seedSchedule(technicianId: string): ScheduleBlock[] {
+  const blocks: ScheduleBlock[] = [];
+  for (let weekday = 1; weekday <= 5; weekday += 1) {
+    blocks.push({
+      id: `${technicianId}-w${weekday}-morning`,
+      technicianId,
+      weekday,
+      from: "08:00",
+      to: "09:00",
+      locationId: "cartagena-1",
+      window: "morning",
+      capacity: 4,
+      active: true,
+    });
+    blocks.push({
+      id: `${technicianId}-w${weekday}-afternoon`,
+      technicianId,
+      weekday,
+      from: "14:00",
+      to: "16:00",
+      locationId: "cartagena-1",
+      window: "afternoon",
+      capacity: 3,
+      active: true,
+    });
+  }
+  blocks.push({
+    id: `${technicianId}-w6-morning`,
+    technicianId,
+    weekday: 6,
+    from: "08:00",
+    to: "09:00",
+    locationId: "turbaco",
+    window: "morning",
+    capacity: 4,
+    active: true,
+  });
+  return blocks;
+}
+
+async function seedIfEmpty(db: AgendaDB): Promise<void> {
+  if (seedChecked) return;
+  seedChecked = true;
+
+  const technicians = await db.count("technicians");
+  if (technicians === 0) {
+    const tx = db.transaction(["technicians"], "readwrite");
+    for (const technician of SEED_TECHNICIANS) {
+      await tx.objectStore("technicians").put(technician);
+    }
+    await tx.done;
+  }
+
+  const locations = await db.count("locations");
+  if (locations === 0) {
+    const tx = db.transaction(["locations"], "readwrite");
+    for (const location of SEED_LOCATIONS) {
+      await tx.objectStore("locations").put(location);
+    }
+    await tx.done;
+  }
+
+  const blocks = await db.count("schedule");
+  if (blocks === 0) {
+    const roster = await db.getAll("technicians");
+    const tx = db.transaction(["schedule"], "readwrite");
+    for (const technician of roster) {
+      for (const block of seedSchedule(technician.id)) {
+        await tx.objectStore("schedule").put(block);
+      }
+    }
+    await tx.done;
+  }
+}
+
+export function getDb(): Promise<AgendaDB> {
+  if (!dbPromise) {
+    dbPromise = openDB<AgendaSchema>(DB_NAME, DB_VERSION, {
+      upgrade(db, oldVersion, _newVersion, tx) {
+        if (!db.objectStoreNames.contains("technicians")) {
+          db.createObjectStore("technicians", { keyPath: "id" });
+        }
+
+        if (!db.objectStoreNames.contains("appointments")) {
+          const store = db.createObjectStore("appointments", { keyPath: "id" });
+          store.createIndex("byDate", "date");
+          store.createIndex("byClient", "clientId");
+          store.createIndex("byTechnician", "technicianId");
+        } else if (oldVersion < 2) {
+          const store = tx.objectStore("appointments");
+          if (!store.indexNames.contains("byTechnician")) {
+            store.createIndex("byTechnician", "technicianId");
+          }
+        }
+
+        if (!db.objectStoreNames.contains("clients")) {
+          const store = db.createObjectStore("clients", { keyPath: "id" });
+          store.createIndex("byName", "normalizedName");
+          store.createIndex("byPhone", "phones", { multiEntry: true });
+        }
+        if (!db.objectStoreNames.contains("vehicles")) {
+          const store = db.createObjectStore("vehicles", { keyPath: "id" });
+          store.createIndex("byClient", "clientId");
+        }
+        if (!db.objectStoreNames.contains("locations")) {
+          db.createObjectStore("locations", { keyPath: "id" });
+        }
+        if (!db.objectStoreNames.contains("schedule")) {
+          const store = db.createObjectStore("schedule", { keyPath: "id" });
+          store.createIndex("byWeekday", "weekday");
+          store.createIndex("byTechnician", "technicianId");
+        } else if (oldVersion < 2) {
+          const store = tx.objectStore("schedule");
+          if (!store.indexNames.contains("byTechnician")) {
+            store.createIndex("byTechnician", "technicianId");
+          }
+        }
+        if (!db.objectStoreNames.contains("messages")) {
+          const store = db.createObjectStore("messages", { keyPath: "id" });
+          store.createIndex("byInbox", "inInbox");
+        }
+        if (!db.objectStoreNames.contains("photos")) {
+          db.createObjectStore("photos", { keyPath: "id" });
+        }
+        if (!db.objectStoreNames.contains("counters")) {
+          db.createObjectStore("counters");
+        }
+      },
+    }).then(async (db) => {
+      await seedIfEmpty(db);
+      return db;
+    });
+  }
+  return dbPromise;
+}
+
+export async function listTechnicians(): Promise<Technician[]> {
+  const db = await getDb();
+  const items = await db.getAll("technicians");
+  return items.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function getTechnician(id: string): Promise<Technician | undefined> {
+  const db = await getDb();
+  return db.get("technicians", id);
+}
+
+export async function listLocations(): Promise<Location[]> {
+  const db = await getDb();
+  return db.getAll("locations");
+}
+
+function locationMatches(location: Location, text: string): boolean {
+  const target = normalize(text);
+  if (normalize(location.name) === target) return true;
+  if (normalize(location.city) === target) return true;
+  return location.aliases.some((alias) => normalize(alias) === target);
+}
+
+export async function resolveLocationText(text: string | null): Promise<string | null> {
+  if (!text) return null;
+  const locations = await listLocations();
+  return locations.find((location) => locationMatches(location, text))?.id ?? null;
+}
+
+export async function suggestLocationId(
+  date: string,
+  type: ServiceType | null,
+  technicianId: string
+): Promise<string | null> {
+  const db = await getDb();
+  const weekday = weekdayOf(date);
+  const blocks = await db.getAllFromIndex("schedule", "byTechnician", technicianId);
+  const window = windowOf(type);
+  const block = blocks
+    .filter((item) => item.active && item.weekday === weekday && item.window === window)
+    .sort((a, b) => a.from.localeCompare(b.from))[0];
+  return block?.locationId ?? null;
+}
+
+/** Sequential, readable id: C-0001, C-000A, C-000B… */
+async function nextId(db: AgendaDB, counter: string, prefix: string): Promise<string> {
+  const tx = db.transaction("counters", "readwrite");
+  const current = (await tx.store.get(counter)) ?? 0;
+  const next = current + 1;
+  await tx.store.put(next, counter);
+  await tx.done;
+  return `${prefix}-${next.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+const NAME_PARTICLES = new Set(["de", "del", "la", "las", "los", "y", "e"]);
+
+function nameTokens(name: string): string[] {
+  return normalize(name)
+    .split(" ")
+    .filter((token) => token.length > 2 && !NAME_PARTICLES.has(token));
+}
+
+function daysBetween(a: string, b: string): number {
+  const [ay, am, ad] = a.split("-").map(Number);
+  const [by, bm, bd] = b.split("-").map(Number);
+  return Math.round((Date.UTC(ay, am - 1, ad) - Date.UTC(by, bm - 1, bd)) / 86400000);
+}
+
+/** Finds an open appointment that looks like the same job: by phone first, then by name. */
+export async function findMatch(
+  draft: Draft,
+  technicianId: string
+): Promise<Appointment | null> {
+  const db = await getDb();
+  const appointments = (await db.getAllFromIndex("appointments", "byTechnician", technicianId))
+    .filter((item) => item.status !== "cancelled" && item.status !== "rescheduled");
+  if (!appointments.length) return null;
+
+  const wanted = draft.name ? nameTokens(draft.name) : [];
+
+  const scored = appointments
+    .map((item) => {
+      let score = 0;
+      if (draft.phone && item.phone && draft.phone === item.phone) score += 20;
+
+      if (wanted.length) {
+        const have = nameTokens(item.name ?? "");
+        const shared = wanted.filter((token) => have.includes(token)).length;
+        if (shared >= 2) score += 10 + shared;
+        else if (shared === 1 && wanted.length === 1 && have.length === 1) score += 11;
+        else if (have.join(" ") === wanted.join(" ")) score += 15;
+      }
+
+      if (draft.model && item.model && normalize(item.model) === normalize(draft.model)) score += 4;
+      if (draft.date && item.date === draft.date) score += 4;
+      else if (draft.date && item.date) score -= Math.min(3, Math.abs(daysBetween(draft.date, item.date)));
+
+      return { item, score };
+    })
+    .filter((entry) => entry.score >= 10)
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.item ?? null;
+}
+
+async function applyDraftToAppointment(
+  id: string,
+  draft: Draft & { locationId?: string | null },
+  mode: DraftMode
+): Promise<void> {
+  const db = await getDb();
+  const current = await db.get("appointments", id);
+  if (!current) return;
+  const now = new Date().toISOString();
+
+  if (mode === "cancel") {
+    await db.put("appointments", { ...current, status: "cancelled", updatedAt: now });
+    return;
+  }
+
+  await db.put("appointments", {
+    ...current,
+    type: draft.type ?? current.type,
+    secondaryType: draft.secondaryType ?? current.secondaryType,
+    name: draft.name ?? current.name,
+    model: draft.model ?? current.model,
+    date: draft.date ?? current.date,
+    weekday: draft.weekday ?? current.weekday,
+    time: draft.time ?? current.time,
+    endTime: draft.endTime ?? current.endTime,
+    phone: draft.phone ?? current.phone,
+    locationId: draft.locationId ?? current.locationId,
+    part: draft.part ?? current.part,
+    description: draft.description ?? current.description,
+    amount: draft.amount ?? current.amount,
+    payment: draft.amount !== null ? "paid" : current.payment,
+    alerts: draft.alerts ?? [],
+    updatedAt: now,
+  });
+}
+
+async function findOrCreateClient(
+  db: AgendaDB,
+  name: string,
+  phone: string | null
+): Promise<Client> {
+  if (phone) {
+    const byPhone = await db.getAllFromIndex("clients", "byPhone", phone);
+    if (byPhone.length) return byPhone[0];
+  }
+
+  const normalizedName = normalize(name);
+  const byName = await db.getAllFromIndex("clients", "byName", normalizedName);
+  if (byName.length) return byName[0];
+
+  const client: Client = {
+    id: await nextId(db, "clients", "CL"),
+    name,
+    normalizedName,
+    phones: phone ? [phone] : [],
+  };
+  await db.put("clients", client);
+  return client;
+}
+
+async function findOrCreateVehicle(
+  db: AgendaDB,
+  clientId: string,
+  model: string | null,
+  plate: string | null,
+  serial: string | null
+): Promise<Vehicle | null> {
+  if (!model && !plate && !serial) return null;
+
+  const vehicles = await db.getAllFromIndex("vehicles", "byClient", clientId);
+  const match = vehicles.find(
+    (vehicle) =>
+      (plate && vehicle.plate === plate) ||
+      (serial && vehicle.serial === serial) ||
+      (model && normalize(vehicle.model ?? "") === normalize(model))
+  );
+  if (match) return match;
+
+  const vehicle: Vehicle = {
+    id: await nextId(db, "vehicles", "V"),
+    clientId,
+    model,
+    plate,
+    serial,
+  };
+  await db.put("vehicles", vehicle);
+  return vehicle;
+}
+
+export async function saveDrafts(
+  drafts: (Draft & {
+    locationId?: string | null;
+    mode?: DraftMode;
+    matchId?: string | null;
+  })[],
+  technicianId: string
+): Promise<{ saved: number; inbox: number }> {
+  const db = await getDb();
+  const locations = await listLocations();
+  let saved = 0;
+  let inbox = 0;
+
+  for (const draft of drafts) {
+    const messageId = await nextId(db, "messages", "M");
+    const receivedAt = draft.receivedAt ?? new Date().toISOString();
+
+    if ((draft.mode === "update" || draft.mode === "cancel") && draft.matchId) {
+      await applyDraftToAppointment(draft.matchId, draft, draft.mode);
+      await db.put("messages", {
+        id: messageId,
+        text: draft.originalText,
+        receivedAt,
+        appointmentId: draft.matchId,
+        inInbox: 0,
+      });
+      saved += 1;
+      continue;
+    }
+
+    if (!draft.name || !draft.date) {
+      await db.put("messages", {
+        id: messageId,
+        text: draft.originalText,
+        receivedAt,
+        appointmentId: null,
+        inInbox: 1,
+      });
+      inbox += 1;
+      continue;
+    }
+
+    const client = await findOrCreateClient(db, draft.name, draft.phone);
+    const vehicle = await findOrCreateVehicle(db, client.id, draft.model, draft.plate, draft.serial);
+
+    let locationId = draft.locationId ?? null;
+    if (!locationId && draft.location) {
+      const found = locations.find((item) => locationMatches(item, draft.location as string));
+      locationId = found?.id ?? null;
+    }
+    if (!locationId) {
+      locationId = await suggestLocationId(draft.date, draft.type, technicianId);
+    }
+
+    const now = new Date().toISOString();
+    const appointment: Appointment = {
+      ...draft,
+      id: await nextId(db, "appointments", "C"),
+      technicianId,
+      clientId: client.id,
+      vehicleId: vehicle?.id ?? null,
+      locationId,
+      alerts: draft.alerts ?? [],
+      notes: null,
+      closedAt: null,
+      photoId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await db.put("appointments", appointment);
+    await db.put("messages", {
+      id: messageId,
+      text: draft.originalText,
+      receivedAt,
+      appointmentId: appointment.id,
+      inInbox: 0,
+    });
+    saved += 1;
+  }
+
+  return { saved, inbox };
+}
+
+export async function appointmentsForDay(
+  date: string,
+  technicianId: string
+): Promise<Appointment[]> {
+  const db = await getDb();
+  const items = await db.getAllFromIndex("appointments", "byDate", date);
+  return items
+    .filter((item) => item.technicianId === technicianId)
+    .sort((a, b) => (a.time ?? "99:99").localeCompare(b.time ?? "99:99"));
+}
+
+export async function availabilityForDay(
+  date: string,
+  technicianId: string
+): Promise<AvailabilityBlock[]> {
+  const db = await getDb();
+  const weekday = weekdayOf(date);
+  const blocks = (await db.getAllFromIndex("schedule", "byTechnician", technicianId))
+    .filter((block) => block.active && block.weekday === weekday)
+    .sort((a, b) => a.from.localeCompare(b.from));
+  const appointments = (await db.getAllFromIndex("appointments", "byDate", date)).filter(
+    (appointment) => appointment.technicianId === technicianId
+  );
+  const locations = await db.getAll("locations");
+  const names = new Map(locations.map((location) => [location.id, location.name]));
+
+  return blocks.map((block) => {
+    const occupied = appointments.filter(
+      (appointment) =>
+        appointment.locationId === block.locationId &&
+        OCCUPYING.has(appointment.status) &&
+        windowOf(appointment.type) === block.window
+    ).length;
+    const free = Math.max(0, block.capacity - occupied);
+    return {
+      ...block,
+      locationName: names.get(block.locationId) ?? block.locationId,
+      occupied,
+      free,
+      state: free === 0 ? "full" : free === 1 ? "last" : "available",
+    };
+  });
+}
+
+export async function listInbox(): Promise<InboxMessage[]> {
+  const db = await getDb();
+  const items = await db.getAllFromIndex("messages", "byInbox", 1);
+  return items.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+}
+
+export async function inboxCount(): Promise<number> {
+  const db = await getDb();
+  return db.countFromIndex("messages", "byInbox", 1);
+}
+
+export async function weekOverview(
+  fromDate: string,
+  technicianId: string
+): Promise<DaySummary[]> {
+  const summary: DaySummary[] = [];
+
+  for (let offset = 0; offset < 7; offset += 1) {
+    const date = isoWithOffset(fromDate, offset);
+    const [appointments, availability] = await Promise.all([
+      appointmentsForDay(date, technicianId),
+      availabilityForDay(date, technicianId),
+    ]);
+    summary.push({
+      date,
+      appointments: appointments.filter((item) => OCCUPYING.has(item.status)).length,
+      free: availability.reduce((total, block) => total + block.free, 0),
+    });
+  }
+
+  return summary;
+}
+
+export async function historyForClient(clientId: string): Promise<Appointment[]> {
+  const db = await getDb();
+  const items = await db.getAllFromIndex("appointments", "byClient", clientId);
+  return items.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+}
+
+export async function closeAppointment(
+  id: string,
+  data: {
+    status: AppointmentStatus;
+    notes: string;
+    photo?: { blob: Blob; mimeType: string } | null;
+  }
+): Promise<void> {
+  const db = await getDb();
+  const appointment = await db.get("appointments", id);
+  if (!appointment) return;
+
+  const now = new Date().toISOString();
+  if (data.photo) {
+    await db.put("photos", {
+      id,
+      blob: data.photo.blob,
+      mimeType: data.photo.mimeType,
+      createdAt: now,
+    });
+  }
+
+  await db.put("appointments", {
+    ...appointment,
+    status: data.status,
+    notes: data.notes.trim() || null,
+    closedAt: now,
+    photoId: data.photo ? id : appointment.photoId ?? null,
+    updatedAt: now,
+  });
+}
+
+export async function getPhoto(id: string): Promise<VisitPhoto | undefined> {
+  const db = await getDb();
+  return db.get("photos", id);
+}
+
+export async function listSchedule(technicianId: string): Promise<ScheduleBlock[]> {
+  const db = await getDb();
+  const blocks = await db.getAllFromIndex("schedule", "byTechnician", technicianId);
+  return blocks.sort((a, b) => a.weekday - b.weekday || a.from.localeCompare(b.from));
+}
+
+export async function updateScheduleBlock(
+  id: string,
+  patch: Partial<ScheduleBlock>
+): Promise<void> {
+  const db = await getDb();
+  const block = await db.get("schedule", id);
+  if (!block) return;
+  await db.put("schedule", { ...block, ...patch });
+}
+
+export async function clearAll(): Promise<void> {
+  const db = await getDb();
+  const stores = ["appointments", "clients", "vehicles", "messages"] as const;
+  const tx = db.transaction(stores, "readwrite");
+  await Promise.all(stores.map((store) => tx.objectStore(store).clear()));
+  await tx.done;
+}

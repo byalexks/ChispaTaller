@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #0f5132;
+  --color-brand-solid: #0f5132;
+  --color-brand-soft: #dcfce7;
+  --color-canvas: #faf8ff;
+  --color-surface: #ffffff;
+  --color-ink: #131b2e;
+  --color-muted: #5b6472;
+  --color-line: #e5e7eb;
+  --color-warn: #b45309;
+  --color-warn-soft: #fef3c7;
+  --color-danger: #ba1a1a;
+  --color-danger-soft: #fee2e2;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/*
+ * Dim theme: a mid gray, not black.
+ * Keeps contrast comfortable for long shifts and does not glow at night.
+ */
+[data-theme="dim"] {
+  --color-brand: #8ce4b4;
+  --color-brand-solid: #1c7a4f;
+  --color-brand-soft: #173629;
+  --color-canvas: #24272c;
+  --color-surface: #2c3037;
+  --color-ink: #e7e9ec;
+  --color-muted: #a4abb5;
+  --color-line: #3b4048;
+  --color-warn: #f3be6c;
+  --color-warn-soft: #3a2f1e;
+  --color-danger: #ff9c93;
+  --color-danger-soft: #3b2524;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+button {
+  font-family: inherit;
+}
+
+textarea,
+select,
+input {
+  font-family: inherit;
+}
