@@ -40,7 +40,7 @@ import {
 } from "./db";
 import { compressPhoto } from "./images";
 import { exportBackup, importBackup } from "./backup";
-import { downloadCsv } from "./export";
+import { downloadCsv, downloadJson } from "./export";
 import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
 import type {
   Alert,
@@ -265,6 +265,52 @@ export default function App() {
     setDayView({ date, appointments, availability });
   }
 
+  async function exportWeek() {
+    if (!technician || week.length === 0) return;
+    const places = await listLocations(true);
+    const place = new Map(places.map((location) => [location.id, location.name]));
+    const days = [];
+
+    for (const day of week) {
+      const [appointments, availability] = await Promise.all([
+        appointmentsForDay(day.date, technician.id),
+        availabilityForDay(day.date, technician.id),
+      ]);
+      days.push({
+        fecha: day.date,
+        cupos: availability.map((block) => ({
+          jornada: block.window,
+          desde: block.from,
+          hasta: block.to,
+          local: block.locationName,
+          cupo: block.capacity,
+          ocupados: block.occupied,
+          libres: block.free,
+        })),
+        citas: appointments.map((appointment) => ({
+          id: appointment.id,
+          hora: appointment.time,
+          cliente: appointment.name,
+          telefono: appointment.phone,
+          vehiculo: appointment.model,
+          tipo: appointment.type,
+          estado: appointment.status,
+          local: appointment.locationId ? place.get(appointment.locationId) ?? null : null,
+          monto: appointment.amount,
+          observaciones: appointment.notes,
+        })),
+      });
+    }
+
+    downloadJson(`semana-${week[0].date}.json`, {
+      generadoEn: new Date().toISOString(),
+      tecnico: technician.name,
+      desde: week[0].date,
+      hasta: week[week.length - 1].date,
+      dias: days,
+    });
+  }
+
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 4000);
@@ -433,6 +479,7 @@ export default function App() {
             days={week}
             onShift={(offset) => setWeekStart(isoWithOffset(weekStart, offset))}
             onOpenDay={(date) => void openDay(date)}
+            onExport={() => void exportWeek()}
           />
         )}
         {view === "clients" && (
@@ -842,10 +889,12 @@ function WeekView({
   days,
   onShift,
   onOpenDay,
+  onExport,
 }: {
   days: DaySummary[];
   onShift: (offset: number) => void;
   onOpenDay: (date: string) => void;
+  onExport: () => void;
 }) {
   const first = days[0]?.date;
   const last = days[days.length - 1]?.date;
@@ -871,6 +920,30 @@ function WeekView({
           aria-label="Semana siguiente"
         >
           ›
+        </button>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onExport}
+          className="flex items-center gap-1 text-[11px] font-semibold text-brand"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 3v12" />
+            <path d="M7 10l5 5 5-5" />
+            <path d="M5 21h14" />
+          </svg>
+          Descargar semana (JSON)
         </button>
       </div>
 
