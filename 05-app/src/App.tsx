@@ -66,15 +66,48 @@ const STATUS_LABEL: Record<AppointmentStatus, string> = {
   cancelled: "Cancelada",
 };
 
-const STATUS_STYLE: Record<AppointmentStatus, string> = {
-  scheduled: "bg-canvas text-muted",
-  to_confirm: "bg-warn-soft text-warn",
-  confirmed: "bg-brand-soft text-brand",
-  attended: "bg-brand-solid text-white",
-  no_show: "bg-danger-soft text-danger",
-  rescheduled: "bg-canvas text-muted",
-  cancelled: "bg-canvas text-muted line-through",
+const STATUS_TONE: Record<AppointmentStatus, Tone> = {
+  scheduled: "neutral",
+  to_confirm: "warning",
+  confirmed: "success",
+  attended: "solid",
+  no_show: "danger",
+  rescheduled: "neutral",
+  cancelled: "muted",
 };
+
+type Tone = "neutral" | "success" | "warning" | "danger" | "solid" | "muted";
+
+const TONE_CLASS: Record<Tone, string> = {
+  neutral: "border border-line bg-surface text-muted",
+  success: "bg-brand-soft text-brand",
+  warning: "bg-warn-soft text-warn",
+  danger: "bg-danger-soft text-danger",
+  solid: "bg-brand-solid text-white",
+  muted: "bg-canvas text-muted line-through",
+};
+
+function Label({
+  tone = "neutral",
+  dot = false,
+  icon,
+  children,
+}: {
+  tone?: Tone;
+  dot?: boolean;
+  icon?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${TONE_CLASS[tone]}`}
+    >
+      {dot && <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />}
+      {icon}
+      {children}
+    </span>
+  );
+}
 
 const TYPE_LABEL: Record<ServiceType, string> = {
   maintenance: "Mantenimiento",
@@ -84,8 +117,8 @@ const TYPE_LABEL: Record<ServiceType, string> = {
 };
 
 const WINDOW_LABEL: Record<"morning" | "afternoon", string> = {
-  morning: "Mañana",
-  afternoon: "Tarde",
+  morning: "Jornada mañana",
+  afternoon: "Jornada tarde",
 };
 
 const longDate = new Intl.DateTimeFormat("es-CO", {
@@ -564,7 +597,7 @@ export default function App() {
       )}
 
       {toast && (
-        <div className="fixed left-1/2 top-4 z-40 -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white shadow-lg">
+        <div className="fixed left-1/2 top-4 z-40 animate-toast -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white shadow-lg">
           {toast}
         </div>
       )}
@@ -607,7 +640,10 @@ function TodayView({
                     : "border-line bg-surface text-ink"
               }`}
             >
-              <p className="font-bold">{WINDOW_LABEL[block.window]}</p>
+              <p className="flex items-center gap-1 font-bold">
+                <WindowIcon window={block.window} className="h-3.5 w-3.5" />
+                {WINDOW_LABEL[block.window]}
+              </p>
               <p className="mt-0.5">
                 {block.occupied}/{block.capacity} · {block.locationName}
               </p>
@@ -622,17 +658,18 @@ function TodayView({
           body="Pegá el mensaje que te llegó por WhatsApp y aparece acá."
           action="Pegar mensaje"
           onAction={onAdd}
+          kind="calendar"
         />
       ) : (
         <>
           <AppointmentGroup
-            title="Mañana · Recepción 8:00–9:00"
+            title="Jornada mañana · Recepción 8:00–9:00"
             block={availability.find((item) => item.window === "morning")}
             items={morning}
             onOpen={onOpen}
           />
           <AppointmentGroup
-            title="Tarde · Revisión 14:00–16:00"
+            title="Jornada tarde · Revisiones 14:00–16:00"
             block={availability.find((item) => item.window === "afternoon")}
             items={afternoon}
             onOpen={onOpen}
@@ -645,11 +682,13 @@ function TodayView({
 
 function AppointmentGroup({
   title,
+  window,
   block,
   items,
   onOpen,
 }: {
   title: string;
+  window: "morning" | "afternoon";
   block?: AvailabilityBlock;
   items: Appointment[];
   onOpen: (appointment: Appointment) => void;
@@ -659,7 +698,10 @@ function AppointmentGroup({
   return (
     <section>
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted">{title}</h2>
+        <h2 className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-muted">
+          <WindowIcon window={window} className="h-3.5 w-3.5" />
+          {title}
+        </h2>
         {block && (
           <span className="text-[11px] font-semibold text-muted">
             {block.occupied}/{block.capacity}
@@ -688,7 +730,7 @@ function AppointmentCard({
   return (
     <article
       onClick={() => onOpen(appointment)}
-      className="cursor-pointer rounded-2xl border border-line bg-surface p-4 shadow-sm active:scale-[0.995]"
+      className="animate-fade cursor-pointer rounded-2xl border border-line bg-surface p-4 shadow-sm active:scale-[0.995]"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -699,11 +741,9 @@ function AppointmentCard({
             {[appointment.model, appointment.time].filter(Boolean).join(" · ")}
           </p>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${STATUS_STYLE[appointment.status]}`}
-        >
+        <Label tone={STATUS_TONE[appointment.status]} dot>
           {STATUS_LABEL[appointment.status]}
-        </span>
+        </Label>
       </div>
 
       {(appointment.part || appointment.description) && (
@@ -716,11 +756,7 @@ function AppointmentCard({
         <span className="rounded-md bg-canvas px-1.5 py-0.5 font-mono text-[10px]">
           #{appointment.id}
         </span>
-        {appointment.type && (
-          <span className="rounded-md bg-canvas px-1.5 py-0.5 font-semibold">
-            {TYPE_LABEL[appointment.type]}
-          </span>
-        )}
+        {appointment.type && <Label>{TYPE_LABEL[appointment.type]}</Label>}
         {appointment.amount !== null && (
           <span className="font-semibold text-brand">{money(appointment.amount)}</span>
         )}
@@ -748,16 +784,17 @@ function InboxView({
   return (
     <div className="space-y-3">
       <p className="rounded-xl bg-canvas px-3 py-2 text-[11px] text-muted">
-        Acá caen los mensajes que no se pudieron interpretar solos. Clasificalos para
-        convertirlos en cita.
+        Acá llegan los mensajes que la app <b>no pudo convertir en cita</b>. Tocá
+        «Clasificar», completá los datos y se agenda.
       </p>
 
       {messages.length === 0 ? (
         <EmptyState
-          title="La bandeja está vacía"
-          body="Cuando un mensaje no se entienda, queda acá para clasificarlo a mano."
+          title="No hay mensajes pendientes"
+          body="Todo lo que pegaste se entendió. Si algo no se entiende, aparece acá."
           action="Pegar mensaje"
           onAction={onAdd}
+          kind="message"
         />
       ) : (
         messages.map((message) => (
@@ -1008,7 +1045,7 @@ function BottomNav({
 }) {
   const items = [
     { key: "today", label: "Hoy" },
-    { key: "inbox", label: "Bandeja" },
+    { key: "inbox", label: "Mensajes" },
     { key: "week", label: "Semana" },
     { key: "clients", label: "Clientes" },
   ] as const;
@@ -1051,9 +1088,9 @@ function Sheet({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-30 flex animate-fade items-end justify-center bg-black/50" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-t-3xl bg-canvas p-5 pb-8 shadow-2xl"
+        className="w-full max-w-md animate-sheet rounded-t-3xl bg-canvas p-5 pb-8 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
@@ -1095,19 +1132,60 @@ function SheetAction({
   );
 }
 
+function Illustration({ kind }: { kind: "calendar" | "message" | "clients" }) {
+  return (
+    <svg
+      viewBox="0 0 96 96"
+      className="mx-auto mb-3 h-20 w-20 animate-float text-brand"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="48" cy="52" r="30" fill="var(--color-brand-soft)" stroke="none" opacity="0.6" />
+      {kind === "calendar" && (
+        <>
+          <rect x="28" y="32" width="40" height="36" rx="8" />
+          <path d="M28 44h40M38 26v8M58 26v8" />
+          <path d="M40 56h6M52 56h6M40 62h6" />
+        </>
+      )}
+      {kind === "message" && (
+        <>
+          <path d="M28 34h40a8 8 0 0 1 8 8v16a8 8 0 0 1-8 8H44l-10 8v-8h-6a8 8 0 0 1-8-8V42a8 8 0 0 1 8-8Z" />
+          <path d="M38 48h20M38 56h12" />
+        </>
+      )}
+      {kind === "clients" && (
+        <>
+          <circle cx="40" cy="42" r="8" />
+          <path d="M26 68c0-8 6-14 14-14s14 6 14 14" />
+          <circle cx="62" cy="46" r="6" />
+          <path d="M56 68c0-6 4-10 10-10" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 function EmptyState({
   title,
   body,
   action,
   onAction,
+  kind = "calendar",
 }: {
   title: string;
   body: string;
   action: string;
   onAction: () => void;
+  kind?: "calendar" | "message" | "clients";
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-line bg-surface/70 p-6 text-center">
+    <div className="animate-fade rounded-2xl border border-dashed border-line bg-surface/70 p-6 text-center">
+      <Illustration kind={kind} />
       <p className="font-semibold">{title}</p>
       <p className="mt-1 text-sm text-muted">{body}</p>
       <button
@@ -1219,7 +1297,7 @@ function Login({
       </div>
 
       <div className="mb-8 text-center">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-solid text-2xl font-bold text-white">
+        <div className="mx-auto mb-4 flex h-14 w-14 animate-pop items-center justify-center rounded-2xl bg-brand-solid text-2xl font-bold text-white">
           A
         </div>
         <h1 className="text-2xl font-extrabold">Agenda</h1>
@@ -1360,6 +1438,51 @@ function ThemeToggle({ theme, onToggle }: { theme: "light" | "dim"; onToggle: ()
     >
       {theme === "dim" ? "☀" : "☾"}
     </button>
+  );
+}
+
+function WindowIcon({
+  window,
+  className = "h-4 w-4",
+}: {
+  window: "morning" | "afternoon";
+  className?: string;
+}) {
+  const sunrise = (
+    <>
+      <path d="M3 18h18" />
+      <path d="M6.5 18a5.5 5.5 0 0 1 11 0" />
+      <path d="M12 3v3" />
+      <path d="M10 4.5 12 2.5l2 2" />
+      <path d="M4 9 5.5 10.5" />
+      <path d="M20 9 18.5 10.5" />
+    </>
+  );
+
+  const sunset = (
+    <>
+      <path d="M3 18h18" />
+      <path d="M6.5 18a5.5 5.5 0 0 1 11 0" />
+      <path d="M12 3v3" />
+      <path d="M10 4.5 12 6.5l2-2" />
+      <path d="M4 9 5.5 10.5" />
+      <path d="M20 9 18.5 10.5" />
+    </>
+  );
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {window === "morning" ? sunrise : sunset}
+    </svg>
   );
 }
 
@@ -2356,6 +2479,7 @@ function ClientsView({
           body="Cuando cargues una cita, el cliente aparece acá con su historial."
           action="Pegar mensaje"
           onAction={onAdd}
+          kind="clients"
         />
       ) : (
         clients.map((client) => (
@@ -2413,9 +2537,9 @@ function ClientSheet({
                 <span className="text-sm font-semibold capitalize">
                   {appointment.date ? formatShort(appointment.date) : "Sin fecha"}
                 </span>
-                <span className="text-[11px] font-semibold">
+                <Label tone={STATUS_TONE[appointment.status]} dot>
                   {STATUS_LABEL[appointment.status]}
-                </span>
+                </Label>
               </div>
               <p className="mt-1 text-[11px] text-muted">
                 {appointment.type ? TYPE_LABEL[appointment.type] : "—"}
@@ -2480,8 +2604,8 @@ function DaySheet({
         ) : (
           <>
             {[
-              { title: "Mañana", items: morning },
-              { title: "Tarde", items: afternoon },
+              { title: "Jornada mañana", items: morning },
+              { title: "Jornada tarde", items: afternoon },
             ].map((group) =>
               group.items.length ? (
                 <section key={group.title}>
