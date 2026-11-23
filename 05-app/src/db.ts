@@ -110,7 +110,7 @@ function seedSchedule(technicianId: string): ScheduleBlock[] {
       technicianId,
       weekday,
       from: "08:00",
-      to: "09:00",
+      to: "12:00",
       locationId: "cartagena-1",
       window: "morning",
       capacity: 4,
@@ -120,8 +120,8 @@ function seedSchedule(technicianId: string): ScheduleBlock[] {
       id: `${technicianId}-w${weekday}-afternoon`,
       technicianId,
       weekday,
-      from: "14:00",
-      to: "16:00",
+      from: "13:00",
+      to: "18:00",
       locationId: "cartagena-1",
       window: "afternoon",
       capacity: 3,
@@ -133,7 +133,7 @@ function seedSchedule(technicianId: string): ScheduleBlock[] {
     technicianId,
     weekday: 6,
     from: "08:00",
-    to: "09:00",
+    to: "12:00",
     locationId: "turbaco",
     window: "morning",
     capacity: 4,
@@ -175,6 +175,23 @@ async function seedIfEmpty(db: AgendaDB): Promise<void> {
     }
     await tx.done;
   }
+}
+
+/** One-time shift from the old 8–9 / 14–16 windows to 8–12 / 13–18. */
+async function migrateWindows(db: AgendaDB): Promise<void> {
+  if (await db.get("settings", "windows-v2")) return;
+
+  const blocks = await db.getAll("schedule");
+  const tx = db.transaction(["schedule", "settings"], "readwrite");
+  for (const block of blocks) {
+    if (block.from === "08:00" && block.to === "09:00") {
+      await tx.objectStore("schedule").put({ ...block, to: "12:00" });
+    } else if (block.from === "14:00" && block.to === "16:00") {
+      await tx.objectStore("schedule").put({ ...block, from: "13:00", to: "18:00" });
+    }
+  }
+  await tx.objectStore("settings").put("1", "windows-v2");
+  await tx.done;
 }
 
 export function getDb(): Promise<AgendaDB> {
@@ -235,6 +252,7 @@ export function getDb(): Promise<AgendaDB> {
       },
     }).then(async (db) => {
       await seedIfEmpty(db);
+      await migrateWindows(db);
       return db;
     });
   }

@@ -20,10 +20,10 @@ const FIELD_ALIASES = {
 
 /** Reception windows per service type. */
 const WINDOWS = {
-  maintenance: { from: "08:00", to: "09:00" },
-  revision: { from: "14:00", to: "16:00" },
-  warranty: { from: "14:00", to: "16:00" },
-  part: { from: "14:00", to: "16:00" },
+  maintenance: { from: "08:00", to: "12:00" },
+  revision: { from: "13:00", to: "18:00" },
+  warranty: { from: "13:00", to: "18:00" },
+  part: { from: "13:00", to: "18:00" },
 };
 
 const FORWARD_HEADER =
