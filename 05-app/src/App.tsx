@@ -351,9 +351,19 @@ export default function App() {
         type="button"
         onClick={() => setSheet("actions")}
         aria-label="Agregar"
-        className="fixed bottom-24 right-5 z-20 flex h-14 w-14 items-center justify-center rounded-full bg-brand-solid text-3xl font-light text-white shadow-xl shadow-brand-solid/30 active:scale-95"
+        className="fixed bottom-24 right-5 z-20 grid h-14 w-14 place-items-center rounded-full bg-brand-solid text-white shadow-xl shadow-brand-solid/30 active:scale-95"
       >
-        +
+        <svg
+          viewBox="0 0 24 24"
+          className="h-7 w-7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M12 5v14M5 12h14" />
+        </svg>
       </button>
 
       <BottomNav view={view} onChange={setView} inboxCount={inboxTotal} />
@@ -1398,7 +1408,7 @@ function ScheduleSheet({
                         <button
                           type="button"
                           onClick={() => void step(block, -1)}
-                          className="h-7 w-7 rounded-md border border-line text-sm"
+                          className="grid h-7 w-7 place-items-center rounded-md border border-line text-sm leading-none"
                         >
                           −
                         </button>
@@ -1408,7 +1418,7 @@ function ScheduleSheet({
                         <button
                           type="button"
                           onClick={() => void step(block, 1)}
-                          className="h-7 w-7 rounded-md border border-line text-sm"
+                          className="grid h-7 w-7 place-items-center rounded-md border border-line text-sm leading-none"
                         >
                           +
                         </button>
