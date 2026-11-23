@@ -314,22 +314,27 @@ export async function clientsOfTechnician(id: string): Promise<TechnicianClient[
   const map = new Map<string, TechnicianClient>();
 
   for (const appointment of appointments) {
-    const key = appointment.phone ?? normalize(appointment.name ?? "");
+    const key = appointment.clientId ?? appointment.phone ?? normalize(appointment.name ?? "");
     if (!key) continue;
     const current = map.get(key);
     if (current) {
       current.visits += 1;
+      if (appointment.date && (!current.lastDate || appointment.date > current.lastDate)) {
+        current.lastDate = appointment.date;
+      }
+      if (!current.phone && appointment.phone) current.phone = appointment.phone;
     } else {
       map.set(key, {
-        id: key,
+        clientId: key,
         name: appointment.name ?? "Sin nombre",
         phone: appointment.phone ?? null,
         visits: 1,
+        lastDate: appointment.date ?? null,
       });
     }
   }
 
-  return [...map.values()].sort((a, b) => b.visits - a.visits);
+  return [...map.values()].sort((a, b) => (b.lastDate ?? "").localeCompare(a.lastDate ?? ""));
 }
 
 export async function getTechnician(id: string): Promise<Technician | undefined> {
@@ -602,6 +607,103 @@ export async function saveDrafts(
   }
 
   return { saved, inbox };
+}
+
+export async function countAppointments(technicianId: string): Promise<number> {
+  const db = await getDb();
+  return db.countFromIndex("appointments", "byTechnician", technicianId);
+}
+
+export async function deleteMessage(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete("messages", id);
+}
+
+const DEMO_PEOPLE: {
+  name: string;
+  model: string;
+  phone: string;
+  type: ServiceType;
+  part?: string;
+  description?: string;
+  amount?: number;
+}[] = [
+  { name: "Engerling Marrugo", model: "galaxy 3", phone: "3012277629", type: "maintenance", part: "flasher", amount: 240000 },
+  { name: "Hilda de Ávila", model: "galaxy 3", phone: "3006532525", type: "maintenance" },
+  { name: "Karol Giraldo", model: "stareer 3", phone: "3015558899", type: "revision", description: "No carga desde hace una semana." },
+  { name: "Rosaida Hernández", model: "Ledo 3", phone: "3007771122", type: "warranty", part: "flasher" },
+  { name: "Jorge Pérez", model: "galaxy 3", phone: "3001112233", type: "maintenance", amount: 180000 },
+  { name: "Marta Ospina", model: "stareer 3", phone: "3124445566", type: "revision", description: "Ruido en la dirección." },
+  { name: "Luis Cárdenas", model: "Ledo 3", phone: "3158889900", type: "maintenance" },
+  { name: "Ana Beltrán", model: "galaxy 3", phone: "3182223344", type: "warranty", part: "cargador" },
+  { name: "Pedro Salas", model: "stareer 3", phone: "3009998877", type: "revision", description: "Revisión de 10.000 km." },
+  { name: "Sofía Ríos", model: "Ledo 3", phone: "3013334455", type: "maintenance", amount: 220000 },
+];
+
+/** Creates believable demo appointments for one technician, to test the UI. */
+export async function seedDemoData(technicianId: string): Promise<number> {
+  const base = todayIso();
+  const statuses: AppointmentStatus[] = ["scheduled", "to_confirm", "confirmed"];
+
+  const drafts = DEMO_PEOPLE.map((person, index) => {
+    const date = isoWithOffset(base, index % 6);
+    const time = person.type === "maintenance" ? "08:00" : "14:00";
+    const draft: Draft = {
+      type: person.type,
+      secondaryType: person.part ? "part" : null,
+      status: statuses[index % statuses.length],
+      name: person.name,
+      model: person.model,
+      date,
+      weekday: weekdayOf(date),
+      time,
+      endTime: person.type === "maintenance" ? "09:00" : "16:00",
+      isWindow: true,
+      phone: person.phone,
+      location: null,
+      address: null,
+      part: person.part ?? null,
+      description: person.description ?? null,
+      instructions: null,
+      amount: person.amount ?? null,
+      payment: person.amount ? "paid" : "pending",
+      plate: null,
+      serial: null,
+      extras: {},
+      originalText: `Datos de prueba · ${person.name}`,
+      receivedAt: new Date().toISOString(),
+    };
+    return draft;
+  });
+
+  const result = await saveDrafts(drafts, technicianId);
+  return result.saved;
+}
+
+/** Deletes every appointment (and its photo) of one technician. Clients stay shared. */
+export async function clearTechnicianData(technicianId: string): Promise<number> {
+  const db = await getDb();
+  const appointments = await db.getAllFromIndex("appointments", "byTechnician", technicianId);
+  if (!appointments.length) return 0;
+
+  const ids = new Set(appointments.map((appointment) => appointment.id));
+  const messages = await db.getAll("messages");
+
+  const tx = db.transaction(["appointments", "messages", "photos"], "readwrite");
+  for (const appointment of appointments) {
+    await tx.objectStore("appointments").delete(appointment.id);
+    if (appointment.photoId) {
+      await tx.objectStore("photos").delete(appointment.photoId);
+    }
+  }
+  for (const message of messages) {
+    if (message.appointmentId && ids.has(message.appointmentId)) {
+      await tx.objectStore("messages").delete(message.id);
+    }
+  }
+  await tx.done;
+
+  return appointments.length;
 }
 
 export async function appointmentsForDay(

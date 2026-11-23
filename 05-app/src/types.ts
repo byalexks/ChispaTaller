@@ -97,10 +97,11 @@ export interface Technician {
 }
 
 export interface TechnicianClient {
-  id: string;
+  clientId: string;
   name: string;
   phone: string | null;
   visits: number;
+  lastDate: string | null;
 }
 
 export interface Client {

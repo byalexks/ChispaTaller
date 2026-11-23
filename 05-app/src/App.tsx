@@ -3,9 +3,12 @@ import { parseMessage, splitMessages } from "./parser.js";
 import {
   appointmentsForDay,
   availabilityForDay,
+  clearTechnicianData,
   clientsOfTechnician,
   closeAppointment,
+  countAppointments,
   createTechnician,
+  deleteMessage,
   deleteTechnician,
   findMatch,
   getAdminPin,
@@ -13,16 +16,19 @@ import {
   getTechnician,
   historyForClient,
   inboxCount as countInbox,
+  isoWithOffset,
   listInbox,
   listLocations,
   listSchedule,
   listTechnicians,
   resolveLocationText,
   saveDrafts,
+  seedDemoData,
   suggestLocationId,
   todayIso,
   updateScheduleBlock,
   updateTechnician,
+  weekdayOf,
   weekOverview,
   windowOf,
 } from "./db";
@@ -33,6 +39,7 @@ import type {
   AppointmentStatus,
   AvailabilityBlock,
   DaySummary,
+  Draft,
   DraftMode,
   InboxMessage,
   Location,
@@ -111,7 +118,7 @@ export default function App() {
   const [technician, setTechnician] = useState<Technician | null>(null);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [booting, setBooting] = useState(true);
-  const [view, setView] = useState<"today" | "inbox" | "week">("today");
+  const [view, setView] = useState<"today" | "inbox" | "week" | "clients">("today");
   const [sheet, setSheet] = useState<"actions" | "paste" | "review" | null>(null);
   const [text, setText] = useState("");
   const [drafts, setDrafts] = useState<ReviewDraft[]>([]);
@@ -122,6 +129,16 @@ export default function App() {
   const [inboxTotal, setInboxTotal] = useState(0);
   const [week, setWeek] = useState<DaySummary[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [clients, setClients] = useState<TechnicianClient[]>([]);
+  const [clientHistory, setClientHistory] = useState<TechnicianClient | null>(null);
+  const [clientAppointments, setClientAppointments] = useState<Appointment[]>([]);
+  const [weekStart, setWeekStart] = useState(todayIso());
+  const [dayView, setDayView] = useState<{
+    date: string;
+    appointments: Appointment[];
+    availability: AvailabilityBlock[];
+  } | null>(null);
+  const [manualMessage, setManualMessage] = useState<InboxMessage | null>(null);
   const [visit, setVisit] = useState<Appointment | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -143,7 +160,7 @@ export default function App() {
     if (!technician) return;
     const current = todayIso();
     setToday(current);
-    const [dayAppointments, dayAvailability, inboxItems, inboxCount, weekDays, locationList] =
+    const [dayAppointments, dayAvailability, inboxItems, inboxCount, weekDays, locationList, clientList] =
       await Promise.all([
         appointmentsForDay(current, technician.id),
         availabilityForDay(current, technician.id),
@@ -151,6 +168,7 @@ export default function App() {
         countInbox(),
         weekOverview(current, technician.id),
         listLocations(),
+        clientsOfTechnician(technician.id),
       ]);
     setAppointments(dayAppointments);
     setAvailability(dayAvailability);
@@ -158,6 +176,7 @@ export default function App() {
     setInboxTotal(inboxCount);
     setWeek(weekDays);
     setLocations(locationList);
+    setClients(clientList);
   }, [technician]);
 
   useEffect(() => {
@@ -177,10 +196,29 @@ export default function App() {
     if (technician) void refresh();
   }, [technician, refresh]);
 
+  useEffect(() => {
+    if (!technician) return;
+    void weekOverview(weekStart, technician.id).then(setWeek);
+  }, [weekStart, technician]);
+
   function switchTechnician() {
     localStorage.removeItem("technicianId");
     setTechnician(null);
     setView("today");
+  }
+
+  async function openClient(client: TechnicianClient) {
+    setClientHistory(client);
+    setClientAppointments(await historyForClient(client.clientId));
+  }
+
+  async function openDay(date: string) {
+    if (!technician) return;
+    const [appointments, availability] = await Promise.all([
+      appointmentsForDay(date, technician.id),
+      availabilityForDay(date, technician.id),
+    ]);
+    setDayView({ date, appointments, availability });
   }
 
   useEffect(() => {
@@ -343,8 +381,19 @@ export default function App() {
             onOpen={setVisit}
           />
         )}
-        {view === "inbox" && <InboxView messages={inbox} onAdd={() => setSheet("actions")} />}
-        {view === "week" && <WeekView days={week} />}
+        {view === "inbox" && (
+          <InboxView messages={inbox} onAdd={() => setSheet("actions")} onClassify={setManualMessage} />
+        )}
+        {view === "week" && (
+          <WeekView
+            days={week}
+            onShift={(offset) => setWeekStart(isoWithOffset(weekStart, offset))}
+            onOpenDay={(date) => void openDay(date)}
+          />
+        )}
+        {view === "clients" && (
+          <ClientsView clients={clients} onOpen={(client) => void openClient(client)} onAdd={() => setSheet("actions")} />
+        )}
       </main>
 
       <button
@@ -436,6 +485,49 @@ export default function App() {
           locations={locations}
           onClose={() => setScheduleOpen(false)}
           onChanged={() => void refresh()}
+        />
+      )}
+
+      {clientHistory && (
+        <ClientSheet
+          client={clientHistory}
+          appointments={clientAppointments}
+          onClose={() => setClientHistory(null)}
+          onOpen={(appointment) => {
+            setClientHistory(null);
+            setVisit(appointment);
+          }}
+        />
+      )}
+
+      {dayView && (
+        <DaySheet
+          date={dayView.date}
+          appointments={dayView.appointments}
+          availability={dayView.availability}
+          onClose={() => setDayView(null)}
+          onOpen={(appointment) => {
+            setDayView(null);
+            setVisit(appointment);
+          }}
+          onAdd={() => {
+            setDayView(null);
+            setSheet("actions");
+          }}
+        />
+      )}
+
+      {manualMessage && technician && (
+        <ManualAppointmentSheet
+          message={manualMessage}
+          technicianId={technician.id}
+          locations={locations}
+          onClose={() => setManualMessage(null)}
+          onSaved={async () => {
+            setManualMessage(null);
+            await refresh();
+            setToast("Cita creada desde la bandeja");
+          }}
         />
       )}
 
@@ -638,13 +730,26 @@ function AppointmentCard({
   );
 }
 
-function InboxView({ messages, onAdd }: { messages: InboxMessage[]; onAdd: () => void }) {
+function InboxView({
+  messages,
+  onAdd,
+  onClassify,
+}: {
+  messages: InboxMessage[];
+  onAdd: () => void;
+  onClassify: (message: InboxMessage) => void;
+}) {
   return (
     <div className="space-y-3">
+      <p className="rounded-xl bg-canvas px-3 py-2 text-[11px] text-muted">
+        Acá caen los mensajes que no se pudieron interpretar solos. Clasificalos para
+        convertirlos en cita.
+      </p>
+
       {messages.length === 0 ? (
         <EmptyState
           title="La bandeja está vacía"
-          body="Acá caen los mensajes que no se pudieron interpretar."
+          body="Cuando un mensaje no se entienda, queda acá para clasificarlo a mano."
           action="Pegar mensaje"
           onAction={onAdd}
         />
@@ -657,6 +762,13 @@ function InboxView({ messages, onAdd }: { messages: InboxMessage[]; onAdd: () =>
             <p className="mt-1 line-clamp-4 whitespace-pre-line text-sm text-ink">
               {message.text}
             </p>
+            <button
+              type="button"
+              onClick={() => onClassify(message)}
+              className="mt-3 h-9 w-full rounded-lg border border-brand/40 text-xs font-semibold text-brand"
+            >
+              Clasificar
+            </button>
           </article>
         ))
       )}
@@ -664,29 +776,66 @@ function InboxView({ messages, onAdd }: { messages: InboxMessage[]; onAdd: () =>
   );
 }
 
-function WeekView({ days }: { days: DaySummary[] }) {
+function WeekView({
+  days,
+  onShift,
+  onOpenDay,
+}: {
+  days: DaySummary[];
+  onShift: (offset: number) => void;
+  onOpenDay: (date: string) => void;
+}) {
+  const first = days[0]?.date;
+  const last = days[days.length - 1]?.date;
+
   return (
-    <div className="space-y-2">
-      {days.map((day) => (
-        <div
-          key={day.date}
-          className="flex items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3"
+    <div className="space-y-3">
+      <div className="flex items-center justify-between rounded-xl border border-line bg-surface px-2 py-1.5">
+        <button
+          type="button"
+          onClick={() => onShift(-7)}
+          className="grid h-8 w-8 place-items-center rounded-lg text-lg text-muted"
+          aria-label="Semana anterior"
         >
-          <div>
-            <p className="text-sm font-semibold capitalize">{formatShort(day.date)}</p>
-            <p className="text-[11px] text-muted">
-              {day.appointments} cita{day.appointments === 1 ? "" : "s"}
-            </p>
-          </div>
-          <span
-            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-              day.free === 0 ? "bg-danger-soft text-danger" : "bg-brand-soft text-brand"
-            }`}
+          ‹
+        </button>
+        <span className="text-[11px] font-semibold capitalize text-muted">
+          {first && last ? `${formatShort(first)} — ${formatShort(last)}` : "—"}
+        </span>
+        <button
+          type="button"
+          onClick={() => onShift(7)}
+          className="grid h-8 w-8 place-items-center rounded-lg text-lg text-muted"
+          aria-label="Semana siguiente"
+        >
+          ›
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {days.map((day) => (
+          <button
+            key={day.date}
+            type="button"
+            onClick={() => onOpenDay(day.date)}
+            className="flex w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3 text-left active:scale-[0.99]"
           >
-            {day.free === 0 ? "Lleno" : `${day.free} libres`}
-          </span>
-        </div>
-      ))}
+            <div>
+              <p className="text-sm font-semibold capitalize">{formatShort(day.date)}</p>
+              <p className="text-[11px] text-muted">
+                {day.appointments} cita{day.appointments === 1 ? "" : "s"}
+              </p>
+            </div>
+            <span
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                day.free === 0 ? "bg-danger-soft text-danger" : "bg-brand-soft text-brand"
+              }`}
+            >
+              {day.free === 0 ? "Lleno" : `${day.free} libres`}
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -847,19 +996,20 @@ function BottomNav({
   onChange,
   inboxCount,
 }: {
-  view: "today" | "inbox" | "week";
-  onChange: (view: "today" | "inbox" | "week") => void;
+  view: "today" | "inbox" | "week" | "clients";
+  onChange: (view: "today" | "inbox" | "week" | "clients") => void;
   inboxCount: number;
 }) {
   const items = [
     { key: "today", label: "Hoy" },
     { key: "inbox", label: "Bandeja" },
     { key: "week", label: "Semana" },
+    { key: "clients", label: "Clientes" },
   ] as const;
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
-      <div className="mx-auto grid max-w-md grid-cols-3">
+      <div className="mx-auto grid max-w-md grid-cols-4">
         {items.map((item) => (
           <button
             key={item.key}
@@ -1581,9 +1731,22 @@ function AdminView({ onClose }: { onClose: () => void }) {
   const [week, setWeek] = useState<DaySummary[]>([]);
   const [clients, setClients] = useState<TechnicianClient[]>([]);
   const [loadingSub, setLoadingSub] = useState(false);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    body: string;
+    confirmLabel: string;
+    danger?: boolean;
+    run: () => Promise<void>;
+  } | null>(null);
 
   const load = useCallback(async () => {
-    setTechnicians(await listTechnicians(true));
+    const list = await listTechnicians(true);
+    setTechnicians(list);
+    const entries = await Promise.all(
+      list.map(async (technician) => [technician.id, await countAppointments(technician.id)] as const)
+    );
+    setCounts(Object.fromEntries(entries));
   }, []);
 
   useEffect(() => {
@@ -1607,20 +1770,62 @@ function AdminView({ onClose }: { onClose: () => void }) {
   }
 
   async function toggle(technician: Technician) {
-    await updateTechnician(technician.id, { active: !technician.active });
-    await load();
+    const nextActive = technician.active === false;
+    setConfirm({
+      title: nextActive ? "Activar técnico" : "Desactivar técnico",
+      body: nextActive
+        ? `${technician.name} va a volver a aparecer en el login.`
+        : `${technician.name} no va a poder entrar, pero sus citas se conservan.`,
+      confirmLabel: nextActive ? "Activar" : "Desactivar",
+      run: async () => {
+        await updateTechnician(technician.id, { active: nextActive });
+        await load();
+      },
+    });
   }
 
-  async function remove(technician: Technician) {
-    const result = await deleteTechnician(technician.id);
-    if (!result.ok) {
-      setError(
-        `${technician.name} tiene ${result.appointments} citas. Desactivalo en vez de borrarlo.`
-      );
-    } else {
-      setError(null);
-    }
-    await load();
+  function remove(technician: Technician) {
+    setConfirm({
+      title: "Eliminar técnico",
+      body: `¿Eliminar a ${technician.name}? Solo se puede si no tiene citas cargadas.`,
+      confirmLabel: "Eliminar",
+      danger: true,
+      run: async () => {
+        const result = await deleteTechnician(technician.id);
+        setError(
+          result.ok
+            ? null
+            : `${technician.name} tiene ${result.appointments} citas. Desactivalo en vez de borrarlo.`
+        );
+        await load();
+      },
+    });
+  }
+
+  function seed(technician: Technician) {
+    setConfirm({
+      title: "Crear datos de prueba",
+      body: `Se van a crear 10 citas de ejemplo para ${technician.name}, repartidas en la semana. Podés borrarlas después.`,
+      confirmLabel: "Crear",
+      run: async () => {
+        await seedDemoData(technician.id);
+        await load();
+      },
+    });
+  }
+
+  function clear(technician: Technician) {
+    const total = counts[technician.id] ?? 0;
+    setConfirm({
+      title: "Borrar datos del técnico",
+      body: `Se eliminarán las ${total} citas de ${technician.name}, sus fotos y los mensajes asociados. No se puede deshacer.`,
+      confirmLabel: "Borrar",
+      danger: true,
+      run: async () => {
+        await clearTechnicianData(technician.id);
+        await load();
+      },
+    });
   }
 
   async function openSub(kind: "week" | "clients", technician: Technician) {
@@ -1691,7 +1896,8 @@ function AdminView({ onClose }: { onClose: () => void }) {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold">{technician.name}</p>
                     <p className="text-[10px] text-muted">
-                      {technician.active === false ? "Desactivado" : "Activo"} · PIN {technician.pin}
+                      {technician.active === false ? "Desactivado" : "Activo"} · PIN{" "}
+                      {technician.pin} · {counts[technician.id] ?? 0} citas
                     </p>
                   </div>
                 </div>
@@ -1729,6 +1935,23 @@ function AdminView({ onClose }: { onClose: () => void }) {
                   className="rounded-lg border border-danger/30 py-1.5 text-[10px] font-semibold text-danger"
                 >
                   Eliminar
+                </button>
+              </div>
+
+              <div className="mt-1 grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  onClick={() => seed(technician)}
+                  className="rounded-lg border border-line py-1.5 text-[10px] font-semibold text-brand"
+                >
+                  Crear datos de prueba
+                </button>
+                <button
+                  type="button"
+                  onClick={() => clear(technician)}
+                  className="rounded-lg border border-danger/30 py-1.5 text-[10px] font-semibold text-danger"
+                >
+                  Borrar datos
                 </button>
               </div>
             </article>
@@ -1772,7 +1995,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
             <div className="max-h-[55vh] space-y-1 overflow-y-auto">
               {clients.map((client) => (
                 <div
-                  key={client.id}
+                  key={client.clientId}
                   className="flex items-center justify-between rounded-lg bg-surface px-3 py-2 text-xs"
                 >
                   <div className="min-w-0">
@@ -1788,7 +2011,391 @@ function AdminView({ onClose }: { onClose: () => void }) {
           )}
         </Sheet>
       )}
+
+      {confirm && (
+        <ConfirmSheet
+          title={confirm.title}
+          body={confirm.body}
+          confirmLabel={confirm.confirmLabel}
+          danger={confirm.danger}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            const run = confirm.run;
+            setConfirm(null);
+            void run();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function ConfirmSheet({
+  title,
+  body,
+  confirmLabel,
+  danger,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  danger?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Sheet title={title} onClose={onCancel}>
+      <p className="text-sm text-muted">{body}</p>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-12 rounded-xl border border-line bg-surface text-sm font-semibold"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className={`h-12 rounded-xl text-sm font-semibold text-white ${
+            danger ? "bg-danger" : "bg-brand-solid"
+          }`}
+        >
+          {confirmLabel}
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
+function ClientsView({
+  clients,
+  onOpen,
+  onAdd,
+}: {
+  clients: TechnicianClient[];
+  onOpen: (client: TechnicianClient) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="space-y-2">
+      {clients.length === 0 ? (
+        <EmptyState
+          title="Todavía no hay clientes"
+          body="Cuando cargues una cita, el cliente aparece acá con su historial."
+          action="Pegar mensaje"
+          onAction={onAdd}
+        />
+      ) : (
+        clients.map((client) => (
+          <button
+            key={client.clientId}
+            type="button"
+            onClick={() => onOpen(client)}
+            className="flex w-full items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3 text-left active:scale-[0.99]"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{client.name}</p>
+              <p className="text-[11px] text-muted">
+                {client.phone ?? "sin teléfono"} · {client.visits} visita
+                {client.visits === 1 ? "" : "s"}
+              </p>
+            </div>
+            <span className="shrink-0 text-lg text-muted">›</span>
+          </button>
+        ))
+      )}
+    </div>
+  );
+}
+
+function ClientSheet({
+  client,
+  appointments,
+  onClose,
+  onOpen,
+}: {
+  client: TechnicianClient;
+  appointments: Appointment[];
+  onClose: () => void;
+  onOpen: (appointment: Appointment) => void;
+}) {
+  return (
+    <Sheet title={client.name} onClose={onClose}>
+      <p className="mb-3 text-xs text-muted">
+        {client.phone ?? "sin teléfono"} · {appointments.length} visita
+        {appointments.length === 1 ? "" : "s"}
+      </p>
+
+      <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+        {appointments.length === 0 ? (
+          <p className="text-sm text-muted">Sin historial todavía.</p>
+        ) : (
+          appointments.map((appointment) => (
+            <button
+              key={appointment.id}
+              type="button"
+              onClick={() => onOpen(appointment)}
+              className="w-full rounded-xl border border-line bg-surface p-3 text-left active:scale-[0.99]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold capitalize">
+                  {appointment.date ? formatShort(appointment.date) : "Sin fecha"}
+                </span>
+                <span className="text-[11px] font-semibold">
+                  {STATUS_LABEL[appointment.status]}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-muted">
+                {appointment.type ? TYPE_LABEL[appointment.type] : "—"}
+                {appointment.amount !== null ? ` · ${money(appointment.amount)}` : ""}
+              </p>
+              {appointment.notes && (
+                <p className="mt-1 line-clamp-2 text-[11px] text-muted">{appointment.notes}</p>
+              )}
+              {appointment.photoId && <p className="mt-1 text-[10px] text-brand">📷 con foto</p>}
+            </button>
+          ))
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+function DaySheet({
+  date,
+  appointments,
+  availability,
+  onClose,
+  onOpen,
+  onAdd,
+}: {
+  date: string;
+  appointments: Appointment[];
+  availability: AvailabilityBlock[];
+  onClose: () => void;
+  onOpen: (appointment: Appointment) => void;
+  onAdd: () => void;
+}) {
+  const morning = appointments.filter((item) => windowOf(item.type) === "morning");
+  const afternoon = appointments.filter((item) => windowOf(item.type) === "afternoon");
+
+  return (
+    <Sheet title={formatLong(date)} onClose={onClose}>
+      {availability.length > 0 && (
+        <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+          {availability.map((block) => (
+            <span
+              key={block.id}
+              className={`shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold ${
+                block.state === "full"
+                  ? "bg-danger-soft text-danger"
+                  : block.state === "last"
+                    ? "bg-warn-soft text-warn"
+                    : "bg-brand-soft text-brand"
+              }`}
+            >
+              {WINDOW_LABEL[block.window]} {block.occupied}/{block.capacity}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="max-h-[52vh] space-y-3 overflow-y-auto pr-1">
+        {appointments.length === 0 ? (
+          <p className="rounded-xl bg-surface px-3 py-6 text-center text-sm text-muted">
+            No hay citas este día.
+          </p>
+        ) : (
+          <>
+            {[
+              { title: "Mañana", items: morning },
+              { title: "Tarde", items: afternoon },
+            ].map((group) =>
+              group.items.length ? (
+                <section key={group.title}>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted">
+                    {group.title}
+                  </p>
+                  <div className="space-y-2">
+                    {group.items.map((appointment) => (
+                      <AppointmentCard
+                        key={appointment.id}
+                        appointment={appointment}
+                        onOpen={onOpen}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ) : null
+            )}
+          </>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={onAdd}
+        className="mt-4 h-11 w-full rounded-xl border border-line bg-surface text-sm font-semibold text-muted"
+      >
+        Pegar mensaje
+      </button>
+    </Sheet>
+  );
+}
+
+function ManualAppointmentSheet({
+  message,
+  technicianId,
+  locations,
+  onClose,
+  onSaved,
+}: {
+  message: InboxMessage;
+  technicianId: string;
+  locations: Location[];
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [name, setName] = useState("");
+  const [model, setModel] = useState("");
+  const [date, setDate] = useState(todayIso());
+  const [time, setTime] = useState("08:00");
+  const [type, setType] = useState<ServiceType>("maintenance");
+  const [locationId, setLocationId] = useState<string | null>(null);
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (name.trim().length < 2) {
+      setError("Falta el nombre del cliente.");
+      return;
+    }
+    if (!date) {
+      setError("Falta la fecha.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const draft: Draft = {
+        type,
+        secondaryType: null,
+        status: "scheduled",
+        name: name.trim(),
+        model: model.trim() || null,
+        date,
+        weekday: weekdayOf(date),
+        time: time || null,
+        endTime: null,
+        isWindow: false,
+        phone: null,
+        location: null,
+        address: null,
+        part: null,
+        description: notes.trim() || null,
+        instructions: null,
+        amount: null,
+        payment: "pending",
+        plate: null,
+        serial: null,
+        extras: {},
+        originalText: message.text,
+        receivedAt: message.receivedAt,
+      };
+      await saveDrafts([{ ...draft, locationId }], technicianId);
+      await deleteMessage(message.id);
+      await onSaved();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudo guardar.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Sheet title="Clasificar mensaje" onClose={onClose}>
+      <div className="max-h-[66vh] space-y-3 overflow-y-auto pr-1">
+        <p className="max-h-24 overflow-y-auto rounded-xl bg-surface p-3 text-[11px] whitespace-pre-line text-muted">
+          {message.text}
+        </p>
+
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Nombre del cliente"
+          className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+        />
+        <input
+          value={model}
+          onChange={(event) => setModel(event.target.value)}
+          placeholder="Vehículo / modelo"
+          className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+        />
+
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+            className="w-full rounded-lg border border-line bg-surface px-2 py-2 text-sm"
+          />
+          <input
+            type="time"
+            value={time}
+            onChange={(event) => setTime(event.target.value)}
+            className="w-full rounded-lg border border-line bg-surface px-2 py-2 text-sm"
+          />
+        </div>
+
+        <select
+          value={type}
+          onChange={(event) => setType(event.target.value as ServiceType)}
+          className="w-full rounded-lg border border-line bg-surface px-2 py-2 text-sm"
+        >
+          <option value="maintenance">Mantenimiento</option>
+          <option value="revision">Revisión</option>
+          <option value="warranty">Garantía</option>
+          <option value="part">Repuesto</option>
+        </select>
+
+        <select
+          value={locationId ?? ""}
+          onChange={(event) => setLocationId(event.target.value || null)}
+          className="w-full rounded-lg border border-line bg-surface px-2 py-2 text-sm"
+        >
+          <option value="">Sin local</option>
+          {locations.map((location) => (
+            <option key={location.id} value={location.id}>
+              {location.name}
+            </option>
+          ))}
+        </select>
+
+        <textarea
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          rows={2}
+          placeholder="Notas"
+          className="w-full resize-none rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+        />
+
+        {error && <p className="rounded-lg bg-danger-soft px-2 py-1.5 text-xs text-danger">{error}</p>}
+      </div>
+
+      <button
+        type="button"
+        disabled={saving}
+        onClick={() => void save()}
+        className="mt-4 h-12 w-full rounded-xl bg-brand-solid text-sm font-semibold text-white disabled:opacity-50"
+      >
+        {saving ? "Guardando…" : "Convertir en cita"}
+      </button>
+    </Sheet>
   );
 }
 
