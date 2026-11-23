@@ -8,6 +8,7 @@ import {
   clientsOfTechnician,
   closeAppointment,
   countAppointments,
+  createLocation,
   createTechnician,
   deleteMessage,
   deleteTechnician,
@@ -32,6 +33,7 @@ import {
   todayIso,
   updateScheduleBlock,
   updateTechnician,
+  updateLocation,
   weekdayOf,
   weekOverview,
   windowOf,
@@ -209,7 +211,7 @@ export default function App() {
         listInbox(),
         countInbox(),
         weekOverview(current, technician.id),
-        listLocations(),
+        listLocations(false),
         clientsOfTechnician(technician.id),
       ]);
     setAppointments(dayAppointments);
@@ -2065,6 +2067,13 @@ function AdminView({ onClose }: { onClose: () => void }) {
   const [clients, setClients] = useState<TechnicianClient[]>([]);
   const [loadingSub, setLoadingSub] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [locationForm, setLocationForm] = useState<{
+    id?: string;
+    name: string;
+    city: string;
+    aliases: string;
+  } | null>(null);
   const [adminPin, setAdminPinValue] = useState("");
   const [adminCurrent, setAdminCurrent] = useState("");
   const [adminNew, setAdminNew] = useState("");
@@ -2081,6 +2090,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
   const load = useCallback(async () => {
     const list = await listTechnicians(true);
     setTechnicians(list);
+    setLocations(await listLocations(true));
     setAdminPinValue(await getAdminPin());
     const entries = await Promise.all(
       list.map(async (technician) => [technician.id, await countAppointments(technician.id)] as const)
@@ -2205,6 +2215,47 @@ function AdminView({ onClose }: { onClose: () => void }) {
     );
   }
 
+  async function saveLocation() {
+    if (!locationForm) return;
+    const name = locationForm.name.trim();
+    if (name.length < 2) {
+      setError("Escribí el nombre del local.");
+      return;
+    }
+    const duplicate = locations.find(
+      (location) =>
+        location.id !== locationForm.id && location.name.trim().toLowerCase() === name.toLowerCase()
+    );
+    if (duplicate) {
+      setError("Ya existe un local con ese nombre.");
+      return;
+    }
+
+    const aliases = locationForm.aliases
+      .split(",")
+      .map((alias) => alias.trim())
+      .filter(Boolean);
+
+    if (locationForm.id) {
+      await updateLocation(locationForm.id, {
+        name,
+        city: locationForm.city.trim() || "Cartagena",
+        aliases,
+      });
+    } else {
+      await createLocation(name, locationForm.city, aliases);
+    }
+
+    setLocationForm(null);
+    setError(null);
+    await load();
+  }
+
+  async function toggleLocation(location: Location) {
+    await updateLocation(location.id, { active: location.active === false });
+    await load();
+  }
+
   function changeAdminPin() {
     if (adminCurrent !== adminPin) {
       setAdminError("El PIN actual no coincide.");
@@ -2300,6 +2351,68 @@ function AdminView({ onClose }: { onClose: () => void }) {
             >
               Agregar
             </button>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-line bg-surface p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold">Locales</p>
+              <p className="text-[10px] text-muted">Nombre, ciudad y alias.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLocationForm({ name: "", city: "Cartagena", aliases: "" })}
+              className="h-9 rounded-lg border border-line px-3 text-[11px] font-semibold text-brand"
+            >
+              Agregar
+            </button>
+          </div>
+
+          <div className="mt-2 space-y-1">
+            {locations.map((location) => (
+              <div
+                key={location.id}
+                className="flex items-center justify-between gap-2 rounded-lg bg-canvas px-2 py-1.5"
+              >
+                <div className="min-w-0">
+                  <p
+                    className={`truncate text-[12px] font-semibold ${
+                      location.active === false ? "text-muted line-through" : ""
+                    }`}
+                  >
+                    {location.name}
+                  </p>
+                  <p className="truncate text-[10px] text-muted">
+                    {location.city}
+                    {location.aliases.length ? ` · ${location.aliases.join(", ")}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLocationForm({
+                        id: location.id,
+                        name: location.name,
+                        city: location.city,
+                        aliases: location.aliases.join(", "),
+                      })
+                    }
+                    className="rounded-md border border-line px-2 py-1 text-[10px] font-semibold text-muted"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void toggleLocation(location)}
+                    className="rounded-md border border-line px-2 py-1 text-[10px] font-semibold text-muted"
+                  >
+                    {location.active === false ? "Activar" : "Desactivar"}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -2480,6 +2593,51 @@ function AdminView({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           )}
+        </Sheet>
+      )}
+
+      {locationForm && (
+        <Sheet
+          title={locationForm.id ? "Editar local" : "Nuevo local"}
+          onClose={() => setLocationForm(null)}
+        >
+          <div className="space-y-2">
+            <input
+              value={locationForm.name}
+              onChange={(event) =>
+                setLocationForm({ ...locationForm, name: event.target.value })
+              }
+              placeholder="Nombre del local"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <input
+              value={locationForm.city}
+              onChange={(event) =>
+                setLocationForm({ ...locationForm, city: event.target.value })
+              }
+              placeholder="Ciudad"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <input
+              value={locationForm.aliases}
+              onChange={(event) =>
+                setLocationForm({ ...locationForm, aliases: event.target.value })
+              }
+              placeholder="Alias separados por coma (opcional)"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <p className="text-[10px] text-muted">
+              Los alias sirven para reconocer el local cuando el mensaje lo escribe distinto
+              (ej.: "Ofero centro").
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void saveLocation()}
+            className="mt-3 h-11 w-full rounded-xl bg-brand-solid text-sm font-semibold text-white"
+          >
+            Guardar
+          </button>
         </Sheet>
       )}
 

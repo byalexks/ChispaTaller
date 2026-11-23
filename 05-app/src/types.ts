@@ -124,6 +124,7 @@ export interface Location {
   name: string;
   city: string;
   aliases: string[];
+  active?: boolean;
 }
 
 export interface ScheduleBlock {

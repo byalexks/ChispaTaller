@@ -342,9 +342,38 @@ export async function getTechnician(id: string): Promise<Technician | undefined>
   return db.get("technicians", id);
 }
 
-export async function listLocations(): Promise<Location[]> {
+export async function listLocations(includeInactive = true): Promise<Location[]> {
   const db = await getDb();
-  return db.getAll("locations");
+  const items = await db.getAll("locations");
+  const filtered = includeInactive ? items : items.filter((item) => item.active !== false);
+  return filtered.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function createLocation(
+  name: string,
+  city: string,
+  aliases: string[] = []
+): Promise<Location> {
+  const db = await getDb();
+  const location: Location = {
+    id: await nextId(db, "locations", "L"),
+    name: name.trim(),
+    city: city.trim() || "Cartagena",
+    aliases: aliases.map((alias) => alias.trim()).filter(Boolean),
+    active: true,
+  };
+  await db.put("locations", location);
+  return location;
+}
+
+export async function updateLocation(
+  id: string,
+  patch: Partial<Pick<Location, "name" | "city" | "aliases" | "active">>
+): Promise<void> {
+  const db = await getDb();
+  const location = await db.get("locations", id);
+  if (!location) return;
+  await db.put("locations", { ...location, ...patch });
 }
 
 function locationMatches(location: Location, text: string): boolean {
