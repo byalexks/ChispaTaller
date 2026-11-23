@@ -706,6 +706,12 @@ export async function clearTechnicianData(technicianId: string): Promise<number>
   return appointments.length;
 }
 
+export async function allAppointmentsForDay(date: string): Promise<Appointment[]> {
+  const db = await getDb();
+  const items = await db.getAllFromIndex("appointments", "byDate", date);
+  return items.sort((a, b) => (a.time ?? "99:99").localeCompare(b.time ?? "99:99"));
+}
+
 export async function appointmentsForDay(
   date: string,
   technicianId: string

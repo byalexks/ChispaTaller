@@ -1,6 +1,7 @@
 ﻿import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { parseMessage, splitMessages } from "./parser.js";
 import {
+  allAppointmentsForDay,
   appointmentsForDay,
   availabilityForDay,
   clearTechnicianData,
@@ -37,6 +38,7 @@ import {
 } from "./db";
 import { compressPhoto } from "./images";
 import { exportBackup, importBackup } from "./backup";
+import { downloadCsv } from "./export";
 import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
 import type {
   Alert,
@@ -120,6 +122,8 @@ const WINDOW_LABEL: Record<"morning" | "afternoon", string> = {
   morning: "Jornada mañana",
   afternoon: "Jornada tarde",
 };
+
+const APP_VERSION = "0.2.2";
 
 const longDate = new Intl.DateTimeFormat("es-CO", {
   weekday: "long",
@@ -628,27 +632,36 @@ function TodayView({
       )}
 
       {availability.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {availability.map((block) => (
-            <div
-              key={block.id}
-              className={`shrink-0 rounded-xl border px-3 py-2 text-xs ${
-                block.state === "full"
-                  ? "border-danger/30 bg-danger-soft text-danger"
-                  : block.state === "last"
-                    ? "border-warn/30 bg-warn-soft text-warn"
-                    : "border-line bg-surface text-ink"
-              }`}
-            >
-              <p className="flex items-center gap-1 font-bold">
-                <WindowIcon window={block.window} className="h-3.5 w-3.5" />
-                {WINDOW_LABEL[block.window]}
-              </p>
-              <p className="mt-0.5">
-                {block.occupied}/{block.capacity} · {block.locationName}
-              </p>
-            </div>
-          ))}
+        <div className="grid grid-cols-2 gap-2">
+          {(["morning", "afternoon"] as const).map((window) => {
+            const block = availability.find((item) => item.window === window);
+            return (
+              <div
+                key={window}
+                className={`rounded-2xl border px-3 py-3 ${
+                  !block
+                    ? "border-line bg-surface text-muted"
+                    : block.state === "full"
+                      ? "border-danger/30 bg-danger-soft text-danger"
+                      : block.state === "last"
+                        ? "border-warn/30 bg-warn-soft text-warn"
+                        : "border-line bg-surface text-ink"
+                }`}
+              >
+                <p className="flex items-center gap-1.5 text-[11px] font-bold">
+                  <span className={window === "morning" ? "text-amber-500" : "text-orange-600"}>
+                    <WindowIcon window={window} className="h-5 w-5" />
+                  </span>
+                  {WINDOW_LABEL[window]}
+                </p>
+                <p className="mt-1 text-[11px]">
+                  {block
+                    ? `${block.occupied}/${block.capacity} · ${block.locationName}`
+                    : "Cerrado"}
+                </p>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -701,7 +714,9 @@ function AppointmentGroup({
     <section>
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <h2 className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-muted">
-          <WindowIcon window={window} className="h-3.5 w-3.5" />
+          <span className={window === "morning" ? "text-amber-500" : "text-orange-600"}>
+            <WindowIcon window={window} className="h-4 w-4" />
+          </span>
           {title}
         </h2>
         {block && (
@@ -1424,6 +1439,7 @@ function Login({
             error && <p className="mt-2 text-center text-xs font-semibold text-danger">{error}</p>
           )}
           <p className="mt-6 text-center text-[11px] text-muted">PIN inicial del técnico: 1234</p>
+          <p className="mt-2 text-center text-[10px] text-muted">versión {APP_VERSION}</p>
         </div>
       )}
     </div>
@@ -1452,23 +1468,21 @@ function WindowIcon({
 }) {
   const sunrise = (
     <>
-      <path d="M3 18h18" />
-      <path d="M6.5 18a5.5 5.5 0 0 1 11 0" />
-      <path d="M12 3v3" />
-      <path d="M10 4.5 12 2.5l2 2" />
-      <path d="M4 9 5.5 10.5" />
-      <path d="M20 9 18.5 10.5" />
+      <path d="M3 19h18" />
+      <circle cx="12" cy="12.5" r="4" />
+      <path d="M12 4.5v2.5" />
+      <path d="M6 8l1.8 1.8" />
+      <path d="M18 8l-1.8 1.8" />
     </>
   );
 
   const sunset = (
     <>
-      <path d="M3 18h18" />
-      <path d="M6.5 18a5.5 5.5 0 0 1 11 0" />
-      <path d="M12 3v3" />
-      <path d="M10 4.5 12 6.5l2-2" />
-      <path d="M4 9 5.5 10.5" />
-      <path d="M20 9 18.5 10.5" />
+      <path d="M3 13h18" />
+      <circle cx="12" cy="15.5" r="4" />
+      <path d="M12 3.5v2.5" />
+      <path d="M6 6.5l1.8 1.8" />
+      <path d="M18 6.5l-1.8 1.8" />
     </>
   );
 
@@ -2008,6 +2022,8 @@ function ProfileSheet({
         >
           Cerrar sesión en este dispositivo
         </button>
+
+        <p className="text-center text-[10px] text-muted">versión {APP_VERSION}</p>
       </div>
 
       <button
@@ -2151,6 +2167,44 @@ function AdminView({ onClose }: { onClose: () => void }) {
     });
   }
 
+  async function exportDay() {
+    const date = todayIso();
+    const [all, places] = await Promise.all([allAppointmentsForDay(date), listLocations()]);
+    const names = new Map(technicians.map((technician) => [technician.id, technician.name]));
+    const place = new Map(places.map((location) => [location.id, location.name]));
+
+    downloadCsv(
+      `cierre-${date}.csv`,
+      all.map((appointment) => ({
+        id: appointment.id,
+        fecha: appointment.date ?? "",
+        hora: appointment.time ?? "",
+        tecnico: names.get(appointment.technicianId) ?? appointment.technicianId,
+        local: appointment.locationId ? place.get(appointment.locationId) ?? "" : "",
+        cliente: appointment.name ?? "",
+        telefono: appointment.phone ?? "",
+        vehiculo: appointment.model ?? "",
+        tipo: appointment.type ?? "",
+        estado: appointment.status,
+        valor: appointment.amount ?? "",
+        observaciones: appointment.notes ?? "",
+      }))
+    );
+  }
+
+  async function exportClients(technician: Technician) {
+    const list = await clientsOfTechnician(technician.id);
+    downloadCsv(
+      `clientes-${technician.name.replace(/\s+/g, "-").toLowerCase()}.csv`,
+      list.map((client) => ({
+        cliente: client.name,
+        telefono: client.phone ?? "",
+        visitas: client.visits,
+        ultima_visita: client.lastDate ?? "",
+      }))
+    );
+  }
+
   function changeAdminPin() {
     if (adminCurrent !== adminPin) {
       setAdminError("El PIN actual no coincide.");
@@ -2206,6 +2260,22 @@ function AdminView({ onClose }: { onClose: () => void }) {
         <p className="rounded-xl bg-brand-soft px-3 py-2 text-[11px] text-brand">
           Agregá, desactivá o borrá técnicos. Podés ver su calendario y sus clientes.
         </p>
+
+        <section className="rounded-2xl border border-line bg-surface p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold">Cierre del día</p>
+              <p className="text-[10px] text-muted">Todas las citas de hoy, en CSV.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void exportDay()}
+              className="h-9 shrink-0 rounded-lg border border-line px-3 text-[11px] font-semibold text-brand"
+            >
+              Exportar CSV
+            </button>
+          </div>
+        </section>
 
         <section className="rounded-2xl border border-line bg-surface p-3">
           <p className="text-xs font-semibold">Agregar técnico</p>
@@ -2332,13 +2402,20 @@ function AdminView({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
 
-              <div className="mt-1 grid grid-cols-2 gap-1">
+              <div className="mt-1 grid grid-cols-3 gap-1">
+                <button
+                  type="button"
+                  onClick={() => void exportClients(technician)}
+                  className="rounded-lg border border-line py-1.5 text-[10px] font-semibold text-muted"
+                >
+                  Clientes CSV
+                </button>
                 <button
                   type="button"
                   onClick={() => seed(technician)}
                   className="rounded-lg border border-line py-1.5 text-[10px] font-semibold text-brand"
                 >
-                  Crear datos de prueba
+                  Crear datos
                 </button>
                 <button
                   type="button"
@@ -2606,12 +2683,17 @@ function DaySheet({
         ) : (
           <>
             {[
-              { title: "Jornada mañana", items: morning },
-              { title: "Jornada tarde", items: afternoon },
+              { title: "Jornada mañana", window: "morning" as const, items: morning },
+              { title: "Jornada tarde", window: "afternoon" as const, items: afternoon },
             ].map((group) =>
               group.items.length ? (
                 <section key={group.title}>
-                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted">
+                  <p className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-muted">
+                    <span
+                      className={group.window === "morning" ? "text-amber-500" : "text-orange-600"}
+                    >
+                      <WindowIcon window={group.window} className="h-4 w-4" />
+                    </span>
                     {group.title}
                   </p>
                   <div className="space-y-2">
