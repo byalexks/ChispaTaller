@@ -664,12 +664,14 @@ function TodayView({
         <>
           <AppointmentGroup
             title="Jornada mañana · Recepción 8:00–9:00"
+            window="morning"
             block={availability.find((item) => item.window === "morning")}
             items={morning}
             onOpen={onOpen}
           />
           <AppointmentGroup
             title="Jornada tarde · Revisiones 14:00–16:00"
+            window="afternoon"
             block={availability.find((item) => item.window === "afternoon")}
             items={afternoon}
             onOpen={onOpen}
