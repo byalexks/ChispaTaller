@@ -746,60 +746,76 @@ export async function deleteMessage(id: string): Promise<void> {
   await db.delete("messages", id);
 }
 
-const DEMO_PEOPLE: {
+type DemoEntry = {
+  day: number;
+  time: string;
   name: string;
   model: string;
   phone: string;
   type: ServiceType;
+  status: AppointmentStatus;
   part?: string;
   description?: string;
   amount?: number;
-}[] = [
-  { name: "Engerling Marrugo", model: "galaxy 3", phone: "3012277629", type: "maintenance", part: "flasher", amount: 240000 },
-  { name: "Hilda de Ávila", model: "galaxy 3", phone: "3006532525", type: "maintenance" },
-  { name: "Karol Giraldo", model: "stareer 3", phone: "3015558899", type: "revision", description: "No carga desde hace una semana." },
-  { name: "Rosaida Hernández", model: "Ledo 3", phone: "3007771122", type: "warranty", part: "flasher" },
-  { name: "Jorge Pérez", model: "galaxy 3", phone: "3001112233", type: "maintenance", amount: 180000 },
-  { name: "Marta Ospina", model: "stareer 3", phone: "3124445566", type: "revision", description: "Ruido en la dirección." },
-  { name: "Luis Cárdenas", model: "Ledo 3", phone: "3158889900", type: "maintenance" },
-  { name: "Ana Beltrán", model: "galaxy 3", phone: "3182223344", type: "warranty", part: "cargador" },
-  { name: "Pedro Salas", model: "stareer 3", phone: "3009998877", type: "revision", description: "Revisión de 10.000 km." },
-  { name: "Sofía Ríos", model: "Ledo 3", phone: "3013334455", type: "maintenance", amount: 220000 },
+};
+
+/** Believable week: all states, no time clashes, and one day filled to capacity. */
+const DEMO: DemoEntry[] = [
+  { day: 0, time: "08:00", name: "Engerling Marrugo", model: "galaxy 3", phone: "3012277629", type: "maintenance", status: "confirmed", part: "flasher", amount: 240000 },
+  { day: 0, time: "09:00", name: "Hilda de Ávila", model: "galaxy 3", phone: "3006532525", type: "maintenance", status: "scheduled" },
+  { day: 0, time: "10:00", name: "Luis Cárdenas", model: "Ledo 3", phone: "3158889900", type: "maintenance", status: "scheduled" },
+  { day: 0, time: "13:00", name: "Karol Giraldo", model: "stareer 3", phone: "3015558899", type: "revision", status: "to_confirm", description: "No carga desde hace una semana." },
+
+  { day: 1, time: "08:00", name: "Ana Beltrán", model: "galaxy 3", phone: "3182223344", type: "maintenance", status: "attended" },
+  { day: 1, time: "09:00", name: "Pedro Salas", model: "stareer 3", phone: "3009998877", type: "maintenance", status: "scheduled" },
+  { day: 1, time: "10:00", name: "Sofía Ríos", model: "Ledo 3", phone: "3013334455", type: "maintenance", status: "confirmed", amount: 220000 },
+  { day: 1, time: "11:00", name: "Camilo Ruiz", model: "galaxy 3", phone: "3107778899", type: "maintenance", status: "to_confirm" },
+  { day: 1, time: "13:00", name: "Rosaida Hernández", model: "Ledo 3", phone: "3007771122", type: "warranty", status: "confirmed", part: "flasher" },
+  { day: 1, time: "14:00", name: "Andrés Prada", model: "stareer 3", phone: "3126667788", type: "revision", status: "no_show", description: "Revisión de frenos." },
+  { day: 1, time: "15:00", name: "Camila Torres", model: "galaxy 3", phone: "3165556677", type: "revision", status: "scheduled" },
+
+  { day: 2, time: "09:00", name: "Diego Mora", model: "stareer 3", phone: "3054445566", type: "maintenance", status: "attended", amount: 180000 },
+  { day: 2, time: "14:00", name: "Valentina Cruz", model: "Ledo 3", phone: "3023334455", type: "revision", status: "cancelled" },
+
+  { day: 3, time: "10:00", name: "Paula Rincón", model: "galaxy 3", phone: "3112223344", type: "maintenance", status: "rescheduled" },
+  { day: 3, time: "15:00", name: "Felipe Gómez", model: "stareer 3", phone: "3191112233", type: "revision", status: "scheduled" },
+
+  { day: 4, time: "08:00", name: "Jorge Pérez", model: "galaxy 3", phone: "3001112233", type: "maintenance", status: "scheduled" },
+
+  { day: 5, time: "13:00", name: "Óscar Díaz", model: "Ledo 3", phone: "3048889900", type: "revision", status: "scheduled" },
+  { day: 5, time: "14:00", name: "Marta Ospina", model: "stareer 3", phone: "3124445566", type: "revision", status: "scheduled", description: "Ruido en la dirección." },
 ];
 
 /** Creates believable demo appointments for one technician, to test the UI. */
 export async function seedDemoData(technicianId: string): Promise<number> {
   const base = todayIso();
-  const statuses: AppointmentStatus[] = ["scheduled", "to_confirm", "confirmed"];
 
-  const drafts = DEMO_PEOPLE.map((person, index) => {
-    const date = isoWithOffset(base, index % 6);
-    const hour =
-      person.type === "maintenance" ? 8 + (index % 4) : 13 + (index % 5);
-    const time = `${String(hour).padStart(2, "0")}:00`;
+  const drafts = DEMO.map((entry) => {
+    const date = isoWithOffset(base, entry.day);
+    const hour = Number(entry.time.slice(0, 2));
     const draft: Draft = {
-      type: person.type,
-      secondaryType: person.part ? "part" : null,
-      status: statuses[index % statuses.length],
-      name: person.name,
-      model: person.model,
+      type: entry.type,
+      secondaryType: entry.part ? "part" : null,
+      status: entry.status,
+      name: entry.name,
+      model: entry.model,
       date,
       weekday: weekdayOf(date),
-      time,
+      time: entry.time,
       endTime: `${String(hour + 1).padStart(2, "0")}:00`,
       isWindow: true,
-      phone: person.phone,
+      phone: entry.phone,
       location: null,
       address: null,
-      part: person.part ?? null,
-      description: person.description ?? null,
+      part: entry.part ?? null,
+      description: entry.description ?? null,
       instructions: null,
-      amount: person.amount ?? null,
-      payment: person.amount ? "paid" : "pending",
+      amount: entry.amount ?? null,
+      payment: entry.amount ? "paid" : "pending",
       plate: null,
       serial: null,
       extras: {},
-      originalText: `Datos de prueba · ${person.name}`,
+      originalText: `Datos de prueba · ${entry.name}`,
       receivedAt: new Date().toISOString(),
     };
     return draft;
