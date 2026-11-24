@@ -232,6 +232,17 @@ try {
     await page.getByPlaceholder("Buscar por nombre o teléfono").fill("engerling");
     await page.getByText("Engerling Marrugo", { exact: true }).first().click();
     await page.getByText(/con foto/i).first().waitFor();
+
+    // Filtros nuevos del historial del cliente.
+    await page.getByRole("button", { name: "Filtros", exact: false }).click();
+    await page.getByText("Solo con fotos").waitFor();
+    await page.getByRole("button", { name: "No", exact: true }).click();
+    await page.getByRole("button", { name: /^Ver / }).click();
+    await page.getByRole("button", { name: "Asistió", exact: true }).click();
+    await page.getByText(/1 de 1 citas/).waitFor();
+    await page.getByRole("button", { name: /^Próximas/ }).click();
+    await page.getByText(/Ninguna cita coincide con los filtros/).waitFor();
+
     await page.getByRole("button", { name: "Cerrar", exact: true }).click();
   });
 

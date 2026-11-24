@@ -64,7 +64,12 @@ import {
 import { downloadCsv, downloadJson, downloadBlob, safeFileName } from "./export";
 import { buildDaily, buildRange, uploadDaily } from "./daily";
 import { pullConfig, pushConfig } from "./configSync";
-import { DEFAULT_SCRIPT_TOKEN, DEFAULT_SCRIPT_URL, hasRemoteDefaults } from "./remote";
+import {
+  DEFAULT_SCRIPT_TOKEN,
+  DEFAULT_SCRIPT_URL,
+  LEGACY_SCRIPT_URLS,
+  hasRemoteDefaults,
+} from "./remote";
 import { zipSync } from "fflate";
 import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
 import type {
@@ -201,6 +206,8 @@ export default function App() {
   const [clients, setClients] = useState<TechnicianClient[]>([]);
   const [clientHistory, setClientHistory] = useState<TechnicianClient | null>(null);
   const [clientAppointments, setClientAppointments] = useState<Appointment[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyAppointments, setHistoryAppointments] = useState<Appointment[]>([]);
   const [weekStart, setWeekStart] = useState(todayIso());
   const [weekAppointments, setWeekAppointments] = useState<Appointment[]>([]);
   const [refreshAsk, setRefreshAsk] = useState(false);
@@ -297,9 +304,18 @@ export default function App() {
       if (now.getHours() < 18) return;
       const today = todayIso();
       if ((await getSetting("lastClosingPrompt")) === today) return;
+
+      const last = await getSetting("lastAutoUploadDate");
+      if (last && last >= today) {
+        await setSetting("lastClosingPrompt", today);
+        return;
+      }
+
       await setSetting("lastClosingPrompt", today);
-      setToast("Cierre del día: exportá el resumen desde el perfil.");
-      void autoUploadDay();
+      const done = autoUpload ? await autoUploadDay() : false;
+      if (!done) {
+        setToast("Cierre del día: subí el resumen desde Mi perfil.");
+      }
     };
 
     void check();
@@ -325,28 +341,36 @@ export default function App() {
     return new Date().getHours() >= 18 ? today : isoWithOffset(today, -1);
   }
 
-  async function autoUploadDay(quiet = true) {
-    if (!autoUpload || !uploadUrl.trim()) return;
+  /** Marks the day as uploaded and silences the 18:00 reminder. */
+  async function markDayUploaded(date = todayIso()) {
+    await setSetting("lastAutoUploadDate", date);
+    await setSetting("lastClosingPrompt", date);
+  }
+
+  async function autoUploadDay(quiet = true): Promise<boolean> {
+    if (!autoUpload || !uploadUrl.trim()) return false;
 
     try {
       const last = await getSetting("lastAutoUploadDate");
       const target = autoTargetDate();
-      if (last && last >= target) return;
+      if (last && last >= target) return true;
 
       setAutoUploading(true);
       const start = last && last < target ? isoWithOffset(last, 1) : target;
       const payload = await buildRange(start, target);
 
       if (!payload.total) {
-        await setSetting("lastAutoUploadDate", target);
-        return;
+        await markDayUploaded(target);
+        return true;
       }
 
       const message = await uploadDaily(uploadUrl.trim(), uploadToken.trim(), payload);
-      await setSetting("lastAutoUploadDate", target);
+      await markDayUploaded(target);
       if (!quiet) setToast(message);
+      return true;
     } catch (error) {
       if (!quiet) showToast(error instanceof Error ? error.message : "No se pudo subir", "error");
+      return false;
     } finally {
       setAutoUploading(false);
     }
@@ -421,12 +445,13 @@ export default function App() {
       const payload = await buildRange(start, today);
 
       if (!payload.total) {
+        await markDayUploaded(today);
         setToast("No hay citas nuevas para subir");
         return;
       }
 
       const message = await uploadDaily(uploadUrl.trim(), uploadToken.trim(), payload);
-      await setSetting("lastAutoUploadDate", today);
+      await markDayUploaded(today);
       showToast(message);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "No se pudo subir", "error");
@@ -460,8 +485,8 @@ export default function App() {
       let url = storedUrl ?? "";
       let token = storedToken ?? "";
 
-      if ((!url || !token) && hasRemoteDefaults()) {
-        url = url || DEFAULT_SCRIPT_URL;
+      if (hasRemoteDefaults() && (!url || !token || LEGACY_SCRIPT_URLS.includes(url))) {
+        url = !url || LEGACY_SCRIPT_URLS.includes(url) ? DEFAULT_SCRIPT_URL : url;
         token = token || DEFAULT_SCRIPT_TOKEN;
         await setSetting("uploadUrl", url);
         await setSetting("uploadToken", token);
@@ -485,7 +510,7 @@ export default function App() {
 
       await setAdminPin(shared.adminPin);
       await setSetting("adminHint", shared.adminHint ?? "");
-      if (shared.uploadUrl) {
+      if (shared.uploadUrl && !LEGACY_SCRIPT_URLS.includes(shared.uploadUrl)) {
         await setSetting("uploadUrl", shared.uploadUrl);
         setUploadUrl(shared.uploadUrl);
       }
@@ -691,6 +716,12 @@ export default function App() {
   async function openClient(client: TechnicianClient) {
     setClientHistory(client);
     setClientAppointments(await historyForClient(client.clientId));
+  }
+
+  async function openHistory() {
+    if (!technician) return;
+    setHistoryAppointments(await allAppointmentsOfTechnician(technician.id));
+    setHistoryOpen(true);
   }
 
   async function openDay(date: string) {
@@ -1026,7 +1057,12 @@ export default function App() {
           />
         )}
         {view === "clients" && (
-          <ClientsView clients={clients} onOpen={(client) => void openClient(client)} onAdd={() => setSheet("actions")} />
+          <ClientsView
+            clients={clients}
+            onOpen={(client) => void openClient(client)}
+            onAdd={() => setSheet("actions")}
+            onHistory={() => void openHistory()}
+          />
         )}
       </main>
 
@@ -1142,6 +1178,17 @@ export default function App() {
           onClose={() => setClientHistory(null)}
           onOpen={(appointment) => {
             setClientHistory(null);
+            setVisit(appointment);
+          }}
+        />
+      )}
+
+      {historyOpen && (
+        <HistorySheet
+          appointments={historyAppointments}
+          onClose={() => setHistoryOpen(false)}
+          onOpen={(appointment) => {
+            setHistoryOpen(false);
             setVisit(appointment);
           }}
         />
@@ -3326,7 +3373,7 @@ function ProfileSheet({
               <p className="text-xs font-semibold">Cierre automático a Google</p>
               <p className="text-[10px] text-muted">
                 Se sube solo después de las 18:00. Si no abriste la app, se pone al día al
-                abrirla.
+                abrirla. Si ya subiste a mano, no vuelve a pedirlo.
               </p>
             </div>
             {uploading && (
@@ -3470,6 +3517,7 @@ function AdminView({
   const [uploadUrl, setUploadUrl] = useState("");
   const [uploadToken, setUploadToken] = useState("");
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [lastUpload, setLastUpload] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [adminPin, setAdminPinValue] = useState("");
   const [adminCurrent, setAdminCurrent] = useState("");
@@ -3493,6 +3541,7 @@ function AdminView({
     setAdminHint((await getSetting("adminHint")) ?? "");
     setUploadUrl((await getSetting("uploadUrl")) ?? "");
     setUploadToken((await getSetting("uploadToken")) ?? "");
+    setLastUpload(await getSetting("lastAutoUploadDate"));
     const entries = await Promise.all(
       list.map(async (technician) => [technician.id, await countAppointments(technician.id)] as const)
     );
@@ -3758,6 +3807,13 @@ function AdminView({
     onToast("Ajustes guardados");
   }
 
+  async function markUploadedToday() {
+    const today = todayIso();
+    await setSetting("lastAutoUploadDate", today);
+    await setSetting("lastClosingPrompt", today);
+    setLastUpload(today);
+  }
+
   async function uploadDay() {
     const url = uploadUrl.trim();
     if (!url) {
@@ -3772,6 +3828,7 @@ function AdminView({
         return;
       }
       const message = await uploadDaily(url, uploadToken.trim(), payload);
+      await markUploadedToday();
       setError(null);
       setUploadStatus(message);
       onToast(message);
@@ -3808,6 +3865,7 @@ function AdminView({
         return;
       }
       const message = await uploadDaily(url, uploadToken.trim(), payload);
+      await markUploadedToday();
       setError(null);
       setUploadStatus(message);
       onToast(message);
@@ -3989,6 +4047,10 @@ function AdminView({
             Sincronizar configuración (PINs)
           </button>
           {uploadStatus && <p className="mt-1 text-[10px] text-brand">{uploadStatus}</p>}
+          <p className="mt-1 text-[10px] text-muted">
+            Última subida:{" "}
+            {lastUpload ? (lastUpload === todayIso() ? "hoy" : lastUpload) : "nunca"}
+          </p>
         </section>
 
         <section className="rounded-2xl border border-line bg-surface p-3">
@@ -4500,10 +4562,12 @@ function ClientsView({
   clients,
   onOpen,
   onAdd,
+  onHistory,
 }: {
   clients: TechnicianClient[];
   onOpen: (client: TechnicianClient) => void;
   onAdd: () => void;
+  onHistory: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "upcoming" | "none">("all");
@@ -4524,13 +4588,22 @@ function ClientsView({
 
   return (
     <div className="space-y-3">
-      <input
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Buscar por nombre o teléfono"
-        aria-label="Buscar cliente"
-        className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm outline-none focus:border-brand"
-      />
+      <div className="flex gap-2">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Buscar por nombre o teléfono"
+          aria-label="Buscar cliente"
+          className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2.5 text-sm outline-none focus:border-brand"
+        />
+        <button
+          type="button"
+          onClick={onHistory}
+          className="shrink-0 rounded-xl border border-line bg-surface px-3 text-[11px] font-semibold text-brand"
+        >
+          Historial
+        </button>
+      </div>
 
       <div className="flex gap-1">
         {(
@@ -4595,6 +4668,399 @@ function ClientsView({
   );
 }
 
+type HistoryWhen = "upcoming" | "past" | "all";
+type HistoryRange = "any" | "30d" | "year";
+
+const HISTORY_WHEN: { key: HistoryWhen; label: string }[] = [
+  { key: "upcoming", label: "Próximas" },
+  { key: "past", label: "Historial" },
+  { key: "all", label: "Todas" },
+];
+
+function isPastAppointment(appointment: Appointment, today: string): boolean {
+  return (
+    Boolean(appointment.date && appointment.date < today) ||
+    appointment.status === "attended" ||
+    appointment.status === "no_show"
+  );
+}
+
+function monthTitle(key: string): string {
+  if (key === "sin-fecha") return "Sin fecha";
+  const date = new Date(`${key}-01T12:00:00`);
+  const text = date.toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function dayBadge(iso: string | null): { day: string; month: string } {
+  if (!iso) return { day: "—", month: "" };
+  const date = new Date(`${iso}T12:00:00`);
+  return {
+    day: String(date.getDate()).padStart(2, "0"),
+    month: date
+      .toLocaleDateString("es-CO", { month: "short" })
+      .replace(".", "")
+      .toUpperCase(),
+  };
+}
+
+function AppointmentHistory({
+  appointments,
+  onOpen,
+  searchable = false,
+}: {
+  appointments: Appointment[];
+  onOpen: (appointment: Appointment) => void;
+  searchable?: boolean;
+}) {
+  const today = todayIso();
+  const [when, setWhen] = useState<HistoryWhen>("all");
+  const [statuses, setStatuses] = useState<AppointmentStatus[]>([]);
+  const [types, setTypes] = useState<ServiceType[]>([]);
+  const [range, setRange] = useState<HistoryRange>("any");
+  const [order, setOrder] = useState<"desc" | "asc">("desc");
+  const [onlyPhotos, setOnlyPhotos] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const fold = (value: string) =>
+    value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+  const needle = fold(query.trim());
+  const since = range === "30d" ? isoWithOffset(today, -30) : null;
+  const year = today.slice(0, 4);
+
+  const toggle = <T,>(list: T[], value: T): T[] =>
+    list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+
+  // Everything except "when", so each tab can show its own count.
+  const base = appointments.filter((appointment) => {
+    if (statuses.length && !statuses.includes(appointment.status)) return false;
+    if (types.length && (!appointment.type || !types.includes(appointment.type))) return false;
+    if (since && (!appointment.date || appointment.date < since)) return false;
+    if (range === "year" && (!appointment.date || !appointment.date.startsWith(year))) return false;
+    if (
+      onlyPhotos &&
+      !((appointment.photoIds?.length ?? 0) > 0 || Boolean(appointment.photoId))
+    ) {
+      return false;
+    }
+    if (needle) {
+      const haystack = fold(
+        `${appointment.name ?? ""} ${appointment.model ?? ""} ${appointment.description ?? ""}`
+      );
+      if (!haystack.includes(needle)) return false;
+    }
+    return true;
+  });
+
+  const counts: Record<HistoryWhen, number> = {
+    upcoming: base.filter((appointment) => !isPastAppointment(appointment, today)).length,
+    past: base.filter((appointment) => isPastAppointment(appointment, today)).length,
+    all: base.length,
+  };
+
+  const visible = base
+    .filter((appointment) => {
+      if (when === "upcoming") return !isPastAppointment(appointment, today);
+      if (when === "past") return isPastAppointment(appointment, today);
+      return true;
+    })
+    .sort((a, b) => {
+      const left = `${a.date ?? ""} ${a.time ?? ""}`;
+      const right = `${b.date ?? ""} ${b.time ?? ""}`;
+      return order === "asc" ? left.localeCompare(right) : right.localeCompare(left);
+    });
+
+  const groups = new Map<string, Appointment[]>();
+  for (const appointment of visible) {
+    const key = appointment.date ? appointment.date.slice(0, 7) : "sin-fecha";
+    const list = groups.get(key) ?? [];
+    list.push(appointment);
+    groups.set(key, list);
+  }
+
+  const advanced =
+    (range !== "any" ? 1 : 0) +
+    (order !== "desc" ? 1 : 0) +
+    (onlyPhotos ? 1 : 0);
+  const active =
+    advanced > 0 || statuses.length > 0 || types.length > 0 || Boolean(query.trim());
+
+  function clearAll() {
+    setStatuses([]);
+    setTypes([]);
+    setRange("any");
+    setOrder("desc");
+    setOnlyPhotos(false);
+    setQuery("");
+  }
+
+  return (
+    <div className="space-y-2">
+      {searchable && (
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Buscar por cliente o vehículo"
+          aria-label="Buscar en el historial"
+          className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+        />
+      )}
+
+      <div className="grid grid-cols-3 gap-1 rounded-xl bg-surface p-1">
+        {HISTORY_WHEN.map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => setWhen(option.key)}
+            className={`rounded-lg px-1 py-2 text-[11px] font-semibold ${
+              when === option.key ? "bg-brand-solid text-white" : "text-muted"
+            }`}
+          >
+            {option.label}{" "}
+            <span className={when === option.key ? "text-white/70" : "text-muted/70"}>
+              {counts[option.key]}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {(Object.keys(STATUS_LABEL) as AppointmentStatus[]).map((status) => (
+          <button
+            key={status}
+            type="button"
+            onClick={() => setStatuses((list) => toggle(list, status))}
+            className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+              statuses.includes(status)
+                ? "bg-brand-solid text-white"
+                : "border border-line bg-surface text-muted"
+            }`}
+          >
+            {STATUS_LABEL[status]}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-1 overflow-x-auto pb-1">
+        {(Object.keys(TYPE_LABEL) as ServiceType[]).map((type) => (
+          <button
+            key={type}
+            type="button"
+            onClick={() => setTypes((list) => toggle(list, type))}
+            className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+              types.includes(type)
+                ? "bg-brand-soft text-brand"
+                : "border border-line bg-surface text-muted"
+            }`}
+          >
+            {TYPE_LABEL[type]}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setFiltersOpen(true)}
+          className="ml-auto flex shrink-0 items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-[10px] font-semibold text-brand"
+        >
+          Filtros
+          {advanced > 0 && (
+            <span className="grid h-4 min-w-4 place-items-center rounded-full bg-brand-solid px-1 text-[9px] text-white">
+              {advanced}
+            </span>
+          )}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 text-[10px] text-muted">
+        <span>
+          {visible.length} de {appointments.length} citas
+          {when === "past" ? " en el historial" : ""}
+        </span>
+        {active && (
+          <button type="button" onClick={clearAll} className="font-semibold text-brand underline">
+            Limpiar filtros
+          </button>
+        )}
+      </div>
+
+      <div className="max-h-[42vh] space-y-2 overflow-y-auto pr-1">
+        {visible.length === 0 ? (
+          <p className="rounded-xl bg-surface px-3 py-6 text-center text-sm text-muted">
+            {appointments.length === 0
+              ? "Sin historial todavía."
+              : "Ninguna cita coincide con los filtros."}
+          </p>
+        ) : (
+          [...groups.entries()].map(([month, items]) => (
+            <section key={month}>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted">
+                {monthTitle(month)}
+              </p>
+              <div className="space-y-2">
+                {items.map((appointment) => {
+                  const badge = dayBadge(appointment.date);
+                  const alert = (appointment.alerts ?? []).find(
+                    (item) => item.severity !== "low"
+                  );
+                  const photos =
+                    (appointment.photoIds?.length ?? 0) > 0 ||
+                    Boolean(appointment.photoId);
+
+                  return (
+                    <button
+                      key={appointment.id}
+                      type="button"
+                      onClick={() => onOpen(appointment)}
+                      className="w-full rounded-2xl border border-line bg-surface p-3 text-left active:scale-[0.99]"
+                    >
+                      <div className="flex gap-3">
+                        <div className="grid h-14 w-12 shrink-0 place-items-center rounded-xl bg-canvas">
+                          <span className="text-lg font-bold leading-none">{badge.day}</span>
+                          <span className="mt-0.5 text-[9px] font-bold text-muted">
+                            {badge.month}
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-[11px] font-semibold text-muted">
+                              {appointment.time ?? "Sin hora"}
+                            </p>
+                            <Label tone={STATUS_TONE[appointment.status]} dot>
+                              {STATUS_LABEL[appointment.status]}
+                            </Label>
+                          </div>
+                          {searchable && (
+                            <p className="truncate text-[11px] font-semibold">
+                              {appointment.name ?? "Sin nombre"}
+                            </p>
+                          )}
+                          <p className="truncate text-sm font-semibold">
+                            {[
+                              appointment.type ? TYPE_LABEL[appointment.type] : "Cita",
+                              appointment.model,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted">
+                            {appointment.amount !== null && (
+                              <span className="font-semibold text-brand">
+                                {money(appointment.amount)}
+                              </span>
+                            )}
+                            {photos && <span>con foto</span>}
+                          </div>
+                          {appointment.notes && (
+                            <p className="mt-1 line-clamp-2 text-[11px] text-muted">
+                              {appointment.notes}
+                            </p>
+                          )}
+                          {alert && (
+                            <p className="mt-1 line-clamp-1 text-[10px] font-medium text-warn">
+                              {alert.message}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ))
+        )}
+      </div>
+
+      {filtersOpen && (
+        <Sheet title="Filtrar citas" onClose={() => setFiltersOpen(false)}>
+          <div className="space-y-3">
+            <section>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted">Fecha</p>
+              <div className="mt-1 flex gap-1">
+                {(
+                  [
+                    { key: "any", label: "Cualquier fecha" },
+                    { key: "30d", label: "Últimos 30 días" },
+                    { key: "year", label: "Este año" },
+                  ] as const
+                ).map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setRange(option.key)}
+                    className={`flex-1 rounded-lg border px-2 py-2 text-[10px] font-semibold ${
+                      range === option.key
+                        ? "border-brand bg-brand-soft text-brand"
+                        : "border-line bg-surface text-muted"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted">Orden</p>
+              <div className="mt-1 flex gap-1">
+                {(
+                  [
+                    { key: "desc", label: "Recientes primero" },
+                    { key: "asc", label: "Antiguas primero" },
+                  ] as const
+                ).map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setOrder(option.key)}
+                    className={`flex-1 rounded-lg border px-2 py-2 text-[10px] font-semibold ${
+                      order === option.key
+                        ? "border-brand bg-brand-soft text-brand"
+                        : "border-line bg-surface text-muted"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="flex items-center justify-between rounded-xl border border-line bg-surface p-3">
+              <div>
+                <p className="text-xs font-semibold">Solo con fotos</p>
+                <p className="text-[10px] text-muted">Citas con evidencia fotográfica.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOnlyPhotos((value) => !value)}
+                className={`h-9 shrink-0 rounded-lg px-3 text-[11px] font-semibold ${
+                  onlyPhotos
+                    ? "bg-brand-solid text-white"
+                    : "border border-line bg-canvas text-muted"
+                }`}
+              >
+                {onlyPhotos ? "Sí" : "No"}
+              </button>
+            </section>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setFiltersOpen(false)}
+            className="mt-4 h-12 w-full rounded-xl bg-brand-solid text-sm font-semibold text-white"
+          >
+            Ver {visible.length} cita{visible.length === 1 ? "" : "s"}
+          </button>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
 function ClientSheet({
   client,
   appointments,
@@ -4606,44 +5072,60 @@ function ClientSheet({
   onClose: () => void;
   onOpen: (appointment: Appointment) => void;
 }) {
+  const today = todayIso();
+  const dates = appointments
+    .map((appointment) => appointment.date)
+    .filter((date): date is string => Boolean(date))
+    .sort();
+  const past = dates.filter((date) => date < today);
+  const next = dates.filter((date) => date >= today);
+  const lastVisit = past.length ? past[past.length - 1] : null;
+  const nextVisit = next.length ? next[0] : null;
+
   return (
     <Sheet title={client.name} onClose={onClose}>
-      <p className="mb-3 text-xs text-muted">
+      <p className="mb-2 text-xs text-muted">
         {client.phone ?? "sin teléfono"} · {appointments.length} visita
         {appointments.length === 1 ? "" : "s"}
       </p>
 
-      <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
-        {appointments.length === 0 ? (
-          <p className="text-sm text-muted">Sin historial todavía.</p>
-        ) : (
-          appointments.map((appointment) => (
-            <button
-              key={appointment.id}
-              type="button"
-              onClick={() => onOpen(appointment)}
-              className="w-full rounded-xl border border-line bg-surface p-3 text-left active:scale-[0.99]"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold capitalize">
-                  {appointment.date ? formatShort(appointment.date) : "Sin fecha"}
-                </span>
-                <Label tone={STATUS_TONE[appointment.status]} dot>
-                  {STATUS_LABEL[appointment.status]}
-                </Label>
-              </div>
-              <p className="mt-1 text-[11px] text-muted">
-                {appointment.type ? TYPE_LABEL[appointment.type] : "—"}
-                {appointment.amount !== null ? ` · ${money(appointment.amount)}` : ""}
-              </p>
-              {appointment.notes && (
-                <p className="mt-1 line-clamp-2 text-[11px] text-muted">{appointment.notes}</p>
-              )}
-              {((appointment.photoIds?.length ?? 0) > 0 || appointment.photoId) && (<p className="mt-1 text-[10px] text-brand">📷 con foto</p>)}
-            </button>
-          ))
-        )}
+      <div className="mb-3 grid grid-cols-3 gap-2 rounded-2xl border border-line bg-surface p-3 text-center">
+        <div>
+          <p className="text-[9px] font-bold uppercase tracking-wider text-muted">Última</p>
+          <p className="text-sm font-bold">{lastVisit ? formatShort(lastVisit) : "—"}</p>
+        </div>
+        <div className="border-x border-line">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-muted">Próxima</p>
+          <p className="text-sm font-bold text-brand">
+            {nextVisit ? formatShort(nextVisit) : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-[9px] font-bold uppercase tracking-wider text-muted">Total</p>
+          <p className="text-sm font-bold">{appointments.length}</p>
+        </div>
       </div>
+
+      <AppointmentHistory appointments={appointments} onOpen={onOpen} />
+    </Sheet>
+  );
+}
+
+function HistorySheet({
+  appointments,
+  onClose,
+  onOpen,
+}: {
+  appointments: Appointment[];
+  onClose: () => void;
+  onOpen: (appointment: Appointment) => void;
+}) {
+  return (
+    <Sheet title="Historial de citas" onClose={onClose}>
+      <p className="mb-2 text-[11px] text-muted">
+        Todas las citas del técnico, incluidas las que ya pasaron y las canceladas.
+      </p>
+      <AppointmentHistory appointments={appointments} onOpen={onOpen} searchable />
     </Sheet>
   );
 }

@@ -6,9 +6,17 @@
  * código. Si algún día se cambia el token, hay que editar acá y volver a publicar.
  */
 export const DEFAULT_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbx4IxJ92LV1V_ZpcPGSbzdMFXPeTD9SoocHCo2OTg52y1IUmVmTsZRq3dYRAIkfK14F/exec";
+  "https://script.google.com/macros/s/AKfycbwSCcp5QoRhzHjtM4ZM0PCF6SxxgN7UaEhpuFfCMVCR7JtZNhzY2q1B5MGkq3vTM9iy/exec";
 
 export const DEFAULT_SCRIPT_TOKEN = "chispa-2026-abc123";
+
+/**
+ * Implementaciones viejas que deben migrarse solas a la URL actual.
+ * Evita que un equipo quede apuntando al despliegue anterior.
+ */
+export const LEGACY_SCRIPT_URLS = [
+  "https://script.google.com/macros/s/AKfycbx4IxJ92LV1V_ZpcPGSbzdMFXPeTD9SoocHCo2OTg52y1IUmVmTsZRq3dYRAIkfK14F/exec",
+];
 
 export function hasRemoteDefaults(): boolean {
   return Boolean(DEFAULT_SCRIPT_URL && DEFAULT_SCRIPT_TOKEN);
