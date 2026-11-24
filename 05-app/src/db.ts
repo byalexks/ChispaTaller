@@ -429,6 +429,11 @@ export async function putTechnician(technician: Technician): Promise<void> {
   await db.put("technicians", technician);
 }
 
+export async function getClient(id: string): Promise<Client | undefined> {
+  const db = await getDb();
+  return db.get("clients", id);
+}
+
 export async function listLocations(includeInactive = true): Promise<Location[]> {
   const db = await getDb();
   const items = await db.getAll("locations");

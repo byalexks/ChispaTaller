@@ -16,6 +16,7 @@ import {
   deleteTechnician,
   findMatch,
   getAdminPin,
+  getClient,
   getSetting,
   photosForAppointment,
   putTechnician,
@@ -2435,6 +2436,18 @@ function VisitSheet({
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [newDate, setNewDate] = useState(appointment.date ?? todayIso());
+  const [clientPhone, setClientPhone] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!appointment.clientId) return;
+    let alive = true;
+    void getClient(appointment.clientId).then((client) => {
+      if (alive && client?.phones?.length) setClientPhone(client.phones[0]);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [appointment.clientId]);
 
   useEffect(() => {
     let urls: string[] = [];
@@ -2527,7 +2540,9 @@ function VisitSheet({
           <p className="mt-1 font-mono text-[10px] text-muted">#{appointment.id}</p>
         </div>
 
-        {appointment.phone && (() => {
+        {(() => {
+          const phone = appointment.phone ?? clientPhone;
+          const enabled = Boolean(phone);
           const place = locations.find((item) => item.id === appointment.locationId)?.name;
           const firstName = (appointment.name ?? "").split(" ")[0] ?? "";
           const when = [
@@ -2539,22 +2554,38 @@ function VisitSheet({
           const text = `Hola ${firstName}, le confirmo su cita${when ? ` del ${when}` : ""}${
             place ? ` en ${place}` : ""
           }.`;
+
           return (
-            <div className="grid grid-cols-2 gap-2">
-              <a
-                href={`tel:+57${appointment.phone}`}
-                className="grid h-10 place-items-center rounded-xl border border-line bg-surface text-xs font-semibold text-ink"
-              >
-                Llamar
-              </a>
-              <a
-                href={`https://wa.me/57${appointment.phone}?text=${encodeURIComponent(text)}`}
-                target="_blank"
-                rel="noreferrer"
-                className="grid h-10 place-items-center rounded-xl bg-brand-soft text-xs font-semibold text-brand"
-              >
-                Confirmar por WhatsApp
-              </a>
+            <div className="space-y-1">
+              <div className="grid grid-cols-2 gap-2">
+                <a
+                  href={enabled ? `tel:+57${phone}` : undefined}
+                  aria-disabled={!enabled}
+                  className={`grid h-10 place-items-center rounded-xl border border-line bg-surface text-xs font-semibold text-ink ${
+                    enabled ? "" : "pointer-events-none opacity-40"
+                  }`}
+                >
+                  Llamar
+                </a>
+                <a
+                  href={
+                    enabled
+                      ? `https://wa.me/57${phone}?text=${encodeURIComponent(text)}`
+                      : undefined
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-disabled={!enabled}
+                  className={`grid h-10 place-items-center rounded-xl bg-brand-soft text-xs font-semibold text-brand ${
+                    enabled ? "" : "pointer-events-none opacity-40"
+                  }`}
+                >
+                  Confirmar por WhatsApp
+                </a>
+              </div>
+              {!enabled && (
+                <p className="text-[10px] text-muted">El cliente no tiene teléfono cargado.</p>
+              )}
             </div>
           );
         })()}
