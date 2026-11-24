@@ -9,6 +9,10 @@
 const SCOPE = "https://www.googleapis.com/auth/calendar.events";
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 
+/** Public OAuth client id for Chispa Taller. Not a secret. */
+export const DEFAULT_CLIENT_ID =
+  "344688969462-4hi6f3pfcfnbbf1eh6qr32pr3pcr499u.apps.googleusercontent.com";
+
 type Token = { value: string; expiresAt: number };
 
 let token: Token | null = null;

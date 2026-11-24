@@ -53,6 +53,7 @@ import {
   insertEvent as insertGoogleEvent,
   isConnected as isGoogleConnected,
   patchEvent as patchGoogleEvent,
+  DEFAULT_CLIENT_ID,
   type GoogleEvent,
 } from "./google";
 import { downloadCsv, downloadJson, downloadBlob, safeFileName } from "./export";
@@ -2644,12 +2645,15 @@ function ProfileSheet({
   const [clientId, setClientId] = useState("");
 
   useEffect(() => {
-    void getSetting("googleClientId").then((value) => setClientId(value ?? ""));
+    void getSetting("googleClientId").then((value) =>
+      setClientId(value?.trim() ? value : DEFAULT_CLIENT_ID)
+    );
   }, []);
 
   async function saveAndConnect() {
-    await setSetting("googleClientId", clientId.trim());
-    await onConnectGoogle(clientId.trim());
+    const id = clientId.trim() || DEFAULT_CLIENT_ID;
+    await setSetting("googleClientId", id);
+    await onConnectGoogle(id);
   }
 
   async function handleExport() {
