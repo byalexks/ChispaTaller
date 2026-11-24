@@ -21,6 +21,7 @@ import {
   getSetting,
   photosForAppointment,
   putTechnician,
+  putLocation,
   removeTechnicianRecord,
   getTechnician,
   historyForClient,
@@ -155,7 +156,7 @@ const WINDOW_LABEL: Record<"morning" | "afternoon", string> = {
   afternoon: "Jornada tarde",
 };
 
-const APP_VERSION = "0.3.1";
+const APP_VERSION = "0.3.2";
 
 const longDate = new Intl.DateTimeFormat("es-CO", {
   weekday: "long",
@@ -387,15 +388,17 @@ export default function App() {
         return;
       }
 
-      const [list, adminPin, adminHint] = await Promise.all([
+      const [list, adminPin, adminHint, places] = await Promise.all([
         listTechnicians(true),
         getAdminPin(),
         getSetting("adminHint"),
+        listLocations(true),
       ]);
       await pushConfig(url, token, {
         adminPin,
         adminHint: adminHint ?? "",
         technicians: list,
+        locations: places,
         uploadUrl: url,
         uploadToken: token,
       });
@@ -501,6 +504,13 @@ export default function App() {
 
       for (const tech of shared.technicians) {
         await putTechnician(tech);
+      }
+
+      for (const location of shared.locations ?? []) {
+        await putLocation(location);
+      }
+      if (shared.locations?.length) {
+        setLocations(await listLocations(true));
       }
 
       const cloudIds = new Set(shared.technicians.map((tech) => tech.id));
@@ -3878,11 +3888,15 @@ function AdminView({
     setError(null);
     onToast(locationForm.id ? "Sede actualizada" : "Sede creada");
     await load();
+    onConfigChanged();
   }
 
   async function toggleLocation(location: Location) {
-    await updateLocation(location.id, { active: location.active === false });
+    const nextActive = location.active === false;
+    await updateLocation(location.id, { active: nextActive });
+    onToast(nextActive ? "Sede activada" : "Sede desactivada");
     await load();
+    onConfigChanged();
   }
 
   async function saveUploadSettings() {
@@ -4129,7 +4143,7 @@ function AdminView({
             onClick={onSyncConfig}
             className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand"
           >
-            Sincronizar configuración (PINs)
+            Sincronizar configuración (PINs y sedes)
           </button>
           {uploadStatus && <p className="mt-1 text-[10px] text-brand">{uploadStatus}</p>}
           <p className="mt-1 text-[10px] text-muted">

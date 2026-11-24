@@ -539,6 +539,12 @@ export async function updateLocation(
   await db.put("locations", { ...location, ...patch });
 }
 
+/** Upserts a location coming from the shared config. */
+export async function putLocation(location: Location): Promise<void> {
+  const db = await getDb();
+  await db.put("locations", location);
+}
+
 function locationMatches(location: Location, text: string): boolean {
   const target = normalize(text);
   if (normalize(location.name) === target) return true;

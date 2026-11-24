@@ -1,10 +1,11 @@
 import { decryptJson, encryptJson } from "./crypto";
-import type { Technician } from "./types";
+import type { Location, Technician } from "./types";
 
 export interface SharedConfig {
   adminPin: string;
   adminHint?: string;
   technicians: Technician[];
+  locations?: Location[];
   uploadUrl?: string;
   uploadToken?: string;
 }
