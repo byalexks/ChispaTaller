@@ -119,6 +119,7 @@ try {
     await page.getByRole("button", { name: "Convertir en cita" }).click();
     await pause(900);
     await page.getByText("Cliente Manual", { exact: true }).first().waitFor();
+    await page.getByText("Cita creada", { exact: true }).first().waitFor();
   });
 
   await step("marcar una cita como por confirmar", async () => {
@@ -140,6 +141,7 @@ try {
     await pause(400);
     await page.getByRole("button", { name: "Confirmar visita" }).click();
     await pause(800);
+    await page.getByText("Visita cerrada", { exact: true }).first().waitFor();
     await page.getByText("Jornada mañana", { exact: false }).first().waitFor();
   });
 
@@ -190,6 +192,7 @@ try {
     await page.getByRole("button", { name: "Actualizar", exact: true }).click();
     await page.getByRole("button", { name: "Sí, actualizar", exact: true }).click();
     await pause(600);
+    await page.getByText("Datos actualizados", { exact: true }).first().waitFor();
     await page.getByRole("button", { name: /Descargar todo/ }).waitFor();
   });
 
@@ -320,11 +323,21 @@ Problema: se reprograma porque la clienta viaja.`;
   });
 
   await step("admin edita el técnico", async () => {
-    await page.getByRole("button", { name: "Editar", exact: true }).first().click();
+    await page
+      .locator("article")
+      .filter({ hasText: "Técnico" })
+      .getByRole("button", { name: "Editar", exact: true })
+      .click();
     const sheet = page.locator(".fixed").last();
     await sheet.getByPlaceholder("Nombre").fill("Técnico Editado");
     await sheet.getByRole("button", { name: "Guardar", exact: true }).click();
     await page.getByText("Técnico Editado", { exact: true }).first().waitFor();
+    await page.getByText("Técnico actualizado", { exact: true }).first().waitFor();
+  });
+
+  await step("admin guarda los ajustes de subida", async () => {
+    await page.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.getByText("Ajustes guardados", { exact: true }).first().waitFor();
   });
 
   const realProblems = problems.filter(

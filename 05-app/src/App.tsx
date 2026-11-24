@@ -688,12 +688,16 @@ export default function App() {
 
   if (adminUnlocked) {
     return (
-      <AdminView
-        onClose={() => {
-          setAdminUnlocked(false);
-          void listTechnicians().then(setTechnicians);
-        }}
-      />
+      <>
+        <AdminView
+          onToast={setToast}
+          onClose={() => {
+            setAdminUnlocked(false);
+            void listTechnicians().then(setTechnicians);
+          }}
+        />
+        <Toast message={toast} />
+      </>
     );
   }
 
@@ -966,7 +970,7 @@ export default function App() {
           onCancel={() => setRefreshAsk(false)}
           onConfirm={() => {
             setRefreshAsk(false);
-            void refreshAll();
+            void refreshAll().then(() => setToast("Datos actualizados"));
           }}
         />
       )}
@@ -982,6 +986,7 @@ export default function App() {
           syncing={syncing}
           onConnectGoogle={handleConnectGoogle}
           onSyncGoogle={() => void syncGoogle(true)}
+          onToast={setToast}
           onClose={() => setProfileOpen(false)}
           onSaved={async () => {
             const updated = await getTechnician(technician.id);
@@ -993,11 +998,29 @@ export default function App() {
         />
       )}
 
-      {toast && (
-        <div className="fixed left-1/2 top-24 z-40 animate-toast -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white shadow-lg">
-          {toast}
-        </div>
-      )}
+      <Toast message={toast} />
+    </div>
+  );
+}
+
+function Toast({ message }: { message: string | null }) {
+  if (!message) return null;
+
+  return (
+    <div className="fixed left-1/2 top-24 z-40 flex animate-toast -translate-x-1/2 items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white shadow-lg">
+      <svg
+        viewBox="0 0 24 24"
+        className="h-3.5 w-3.5 text-green-400"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+      {message}
     </div>
   );
 }
@@ -2628,6 +2651,7 @@ function ProfileSheet({
   syncing,
   onConnectGoogle,
   onSyncGoogle,
+  onToast,
   onClose,
   onSaved,
   onLogout,
@@ -2641,6 +2665,7 @@ function ProfileSheet({
   syncing: boolean;
   onConnectGoogle: (clientId: string) => Promise<void>;
   onSyncGoogle: () => void;
+  onToast: (message: string) => void;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   onLogout: () => void;
@@ -2675,6 +2700,7 @@ function ProfileSheet({
     link.click();
     URL.revokeObjectURL(url);
     onBackupDone();
+    onToast("Respaldo descargado");
   }
 
   async function save() {
@@ -2791,7 +2817,10 @@ function ProfileSheet({
             </div>
             <button
               type="button"
-              onClick={() => onToggleClosing(!closingReminder)}
+              onClick={() => {
+                onToggleClosing(!closingReminder);
+                onToast(closingReminder ? "Aviso desactivado" : "Aviso activado");
+              }}
               className={`h-9 shrink-0 rounded-lg px-3 text-[11px] font-semibold ${
                 closingReminder
                   ? "bg-brand-solid text-white"
@@ -2881,7 +2910,7 @@ function ProfileSheet({
   );
 }
 
-function AdminView({ onClose }: { onClose: () => void }) {
+function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
@@ -2950,6 +2979,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
     await createTechnician(name.trim(), pin);
     setName("");
     setPin("");
+    onToast("Técnico agregado");
     await load();
   }
 
@@ -2963,6 +2993,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
       confirmLabel: nextActive ? "Activar" : "Desactivar",
       run: async () => {
         await updateTechnician(technician.id, { active: nextActive });
+        onToast(nextActive ? "Técnico activado" : "Técnico desactivado");
         await load();
       },
     });
@@ -2976,6 +3007,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
       danger: true,
       run: async () => {
         const result = await deleteTechnician(technician.id);
+        if (result.ok) onToast("Técnico eliminado");
         setError(
           result.ok
             ? null
@@ -2993,6 +3025,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
       confirmLabel: "Crear",
       run: async () => {
         await seedDemoData(technician.id);
+        onToast("Datos de prueba creados");
         await load();
       },
     });
@@ -3007,6 +3040,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
       danger: true,
       run: async () => {
         await clearTechnicianData(technician.id);
+        onToast("Datos del técnico borrados");
         await load();
       },
     });
@@ -3124,6 +3158,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
     await updateTechnician(editForm.id, { name: editForm.name.trim(), pin: editForm.pin });
     setEditForm(null);
     setError(null);
+    onToast("Técnico actualizado");
     await load();
   }
 
@@ -3160,6 +3195,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
 
     setLocationForm(null);
     setError(null);
+    onToast(locationForm.id ? "Local actualizado" : "Local creado");
     await load();
   }
 
@@ -3172,6 +3208,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
     await setSetting("uploadUrl", uploadUrl.trim());
     await setSetting("uploadToken", uploadToken.trim());
     setUploadStatus("Guardado");
+    onToast("Ajustes guardados");
   }
 
   async function uploadDay() {
@@ -3189,6 +3226,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
       const message = await uploadDaily(url, uploadToken.trim(), payload);
       setError(null);
       setUploadStatus(message);
+      onToast(message);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo subir.");
     }
@@ -3221,6 +3259,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
       const message = await uploadDaily(url, uploadToken.trim(), payload);
       setError(null);
       setUploadStatus(message);
+      onToast(message);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo subir.");
     }
@@ -3261,6 +3300,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
         setAdminNew("");
         setAdminRepeat("");
         setAdminError(null);
+        onToast("PIN de administrador cambiado");
       },
     });
   }

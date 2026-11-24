@@ -82,11 +82,11 @@ input {
 
 @keyframes toast-in {
   from {
-    transform: translate(-50%, -10px);
+    transform: translateY(-8px);
     opacity: 0;
   }
   to {
-    transform: translate(-50%, 0);
+    transform: translateY(0);
     opacity: 1;
   }
 }
