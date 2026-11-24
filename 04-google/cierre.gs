@@ -34,12 +34,15 @@ function doPost(e) {
     }
 
     const sheet = getSheet();
+    const lastRow = sheet.getLastRow();
     const existing = new Set(
-      sheet
-        .getRange(2, 1, Math.max(sheet.getLastRow() - 1, 0), 1)
-        .getValues()
-        .flat()
-        .map(String)
+      lastRow > 1
+        ? sheet
+            .getRange(2, 1, lastRow - 1, 1)
+            .getValues()
+            .flat()
+            .map(String)
+        : []
     );
 
     const rows = [];
