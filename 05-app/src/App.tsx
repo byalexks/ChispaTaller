@@ -3650,6 +3650,55 @@ function AdminView({ onClose }: { onClose: () => void }) {
         </Sheet>
       )}
 
+      {editForm && (
+        <Sheet title="Editar técnico" onClose={() => setEditForm(null)}>
+          <div className="space-y-2">
+            <input
+              value={editForm.name}
+              onChange={(event) => setEditForm({ ...editForm, name: event.target.value })}
+              placeholder="Nombre"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <input
+              value={editForm.pin}
+              onChange={(event) =>
+                setEditForm({
+                  ...editForm,
+                  pin: event.target.value.replace(/\D/g, "").slice(0, 4),
+                })
+              }
+              placeholder="PIN de 4 dígitos"
+              inputMode="numeric"
+              aria-label="PIN del técnico"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <p className="text-[10px] text-muted">
+              El técnico va a usar este nombre y PIN la próxima vez que entre.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void saveTechnician()}
+            className="mt-3 h-11 w-full rounded-xl bg-brand-solid text-sm font-semibold text-white"
+          >
+            Guardar
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const target = technicians.find((item) => item.id === editForm.id);
+              setEditForm(null);
+              if (target) remove(target);
+            }}
+            className="mt-2 h-10 w-full rounded-xl border border-danger/30 text-xs font-semibold text-danger"
+          >
+            Eliminar técnico
+          </button>
+        </Sheet>
+      )}
+
       {locationForm && (
         <Sheet
           title={locationForm.id ? "Editar local" : "Nuevo local"}

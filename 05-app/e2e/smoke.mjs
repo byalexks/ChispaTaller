@@ -319,6 +319,14 @@ Problema: se reprograma porque la clienta viaja.`;
     }
   });
 
+  await step("admin edita el técnico", async () => {
+    await page.getByRole("button", { name: "Editar", exact: true }).first().click();
+    const sheet = page.locator(".fixed").last();
+    await sheet.getByPlaceholder("Nombre").fill("Técnico Editado");
+    await sheet.getByRole("button", { name: "Guardar", exact: true }).click();
+    await page.getByText("Técnico Editado", { exact: true }).first().waitFor();
+  });
+
   const realProblems = problems.filter(
     (message) =>
       !message.includes("Download the React DevTools") &&
