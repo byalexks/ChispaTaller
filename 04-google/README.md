@@ -3,27 +3,42 @@
 La app trabaja local en el teléfono. Al cerrar el día sube las citas a una
 **hoja de Google** mediante un **Apps Script**. Sin servidor y sin costo.
 
-## Camino corto (sin token)
+## Camino corto
 
 1. Abrí <https://sheets.new> y nombrala *Chispa Taller — Cierre*.
 2. **Extensiones → Apps Script**.
-3. Borrá todo y pegá `cierre.gs` tal como está (el `TOKEN` viene vacío).
+3. Borrá todo y pegá `cierre.gs` tal como está (ya trae el token de la app).
 4. **Implementar → Nueva implementación → Aplicación web**
    - *Ejecutar como*: **Yo**
    - *Acceso*: **Cualquier usuario**
 5. Copiá la URL que termina en `/exec`.
 6. En la app: **Mi perfil → Cierre automático** → pegá la URL → **Guardar** →
-   **Subir ahora**. El campo Token puede quedar vacío.
+   **Subir ahora**. El token se llena solo con el valor por defecto.
 
-> Con `TOKEN` vacío no se valida clave: quien tenga la URL puede escribir en la
-> hoja. Sirve para probar. Cuando funcione, poné una clave en el script, creá una
-> **versión nueva** y pegala en la app.
+> El token es la misma clave que está en `05-app/src/remote.ts`. Como la app se
+> publica en GitHub Pages, esa clave es visible en el código: sirve para que
+> cualquier equipo quede configurado solo, no como secreto fuerte. Si algún día
+> la cambiás, cambiala en el script y en `remote.ts`, y publicá una **versión
+> nueva** del script y un deploy nuevo de la app.
 
 ## Si cambiás el script
 
 Siempre: **Implementar → Administrar implementaciones → lápiz → Nueva versión →
 Implementar**. Sin eso, la web app sigue corriendo el código viejo (es la causa
 más común de “Token inválido” o de que no aparezca la hoja).
+
+## Cabeceras de la hoja
+
+La **fila 1** siempre es la cabecera (`ID`, `Fecha`, `Hora`…). El script la revisa
+en cada subida:
+
+- Si borraste todo para hacer pruebas, la vuelve a escribir.
+- Si hay datos viejos sin cabecera, **inserta una fila arriba** y no borra nada.
+- Si la cabecera estaba a medias o en otra fila, la corrige en la fila 1.
+- La fila 1 queda en negrita y congelada.
+
+No hace falta limpiar la hoja de una forma especial: podés borrar las filas y la
+próxima subida la deja lista otra vez. `VERSION` ahora es **4**.
 
 ## Configuración compartida (técnicos, PINs y PIN admin)
 

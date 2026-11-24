@@ -1,13 +1,13 @@
 /**
  * Chispa Taller — receptor del cierre diario.
  *
- * MODO PRUEBA: TOKEN vacío = no pide clave. Cualquiera con la URL puede escribir.
- * Cuando confirmes que funciona, poné una clave larga acá y en la app.
+ * TOKEN debe ser el mismo que usa la app (05-app/src/remote.ts). Si lo cambiás,
+ * cambialo en los dos lados y publicá una versión nueva.
  */
 
-const TOKEN = "";
+const TOKEN = "chispa-2026-abc123";
 const SHEET_NAME = "Cierre";
-const VERSION = "3";
+const VERSION = "4";
 
 const HEADERS = [
   "ID",
@@ -49,6 +49,7 @@ function doPost(e) {
     }
 
     const sheet = getSheet();
+    ensureHeaders(sheet);
     const lastRow = sheet.getLastRow();
     const existing = new Set(
       lastRow > 1
@@ -128,11 +129,40 @@ function getSheet() {
   let sheet = book.getSheetByName(SHEET_NAME);
   if (!sheet) {
     sheet = book.insertSheet(SHEET_NAME);
-    sheet.appendRow(HEADERS);
-    sheet.getRange(1, 1, 1, HEADERS.length).setFontWeight("bold");
-    sheet.setFrozenRows(1);
   }
+  ensureHeaders(sheet);
   return sheet;
+}
+
+/**
+ * The first row is always the header row.
+ *
+ * If the sheet was cleaned (or has old data without headers), the headers are
+ * written again. Existing rows are never deleted: if row 1 already has data,
+ * a new row is inserted above it so that row 1 becomes the header.
+ */
+function ensureHeaders(sheet) {
+  const width = HEADERS.length;
+  const first = sheet.getRange(1, 1, 1, width).getValues()[0];
+  const already = HEADERS.every(
+    (header, index) => String(first[index]).trim() === header
+  );
+
+  if (!already) {
+    const empty = first.every((value) => String(value).trim() === "");
+    const looksLikeHeader = first.some((value) =>
+      HEADERS.includes(String(value).trim())
+    );
+
+    // Row 1 has real data (not a header): push it down, never delete it.
+    if (!empty && !looksLikeHeader && sheet.getLastRow() > 0) {
+      sheet.insertRowBefore(1);
+    }
+    sheet.getRange(1, 1, 1, width).setValues([HEADERS]);
+  }
+
+  sheet.getRange(1, 1, 1, width).setFontWeight("bold");
+  sheet.setFrozenRows(1);
 }
 
 function json(payload) {
