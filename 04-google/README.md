@@ -1,43 +1,29 @@
 # Cierre diario a Google (híbrido)
 
-La app trabaja local en el teléfono. Al cerrar el día, el admin sube las citas a
-una **hoja de Google** mediante un **Apps Script**. Sin servidor y sin costo.
+La app trabaja local en el teléfono. Al cerrar el día sube las citas a una
+**hoja de Google** mediante un **Apps Script**. Sin servidor y sin costo.
 
-## 1. Hoja y script (5 minutos)
+## Camino corto (sin token)
 
-1. En la **misma cuenta** donde creaste el Client ID, abrí
-   <https://sheets.new> y poné un nombre (ej. *Chispa Taller — Cierre*).
+1. Abrí <https://sheets.new> y nombrala *Chispa Taller — Cierre*.
 2. **Extensiones → Apps Script**.
-3. Borrá lo que haya y pegá el contenido de `cierre.gs`.
-4. Cambiá `TOKEN` por una clave larga inventada. Anotá la clave: va también en la app.
-5. **Implementar → Nueva implementación → Aplicación web**:
+3. Borrá todo y pegá `cierre.gs` tal como está (el `TOKEN` viene vacío).
+4. **Implementar → Nueva implementación → Aplicación web**
    - *Ejecutar como*: **Yo**
-   - *Quién tiene acceso*: **Cualquier usuario** (necesario para que la app pueda enviar sin login)
-6. Autorizá los permisos.
-7. Copiá la URL que termina en **`/exec`**.
+   - *Acceso*: **Cualquier usuario**
+5. Copiá la URL que termina en `/exec`.
+6. En la app: **Mi perfil → Cierre automático** → pegá la URL → **Guardar** →
+   **Subir ahora**. El campo Token puede quedar vacío.
 
-> “Cualquier usuario” suena abierto, pero el script solo escribe si el token
-> coincide. Si te preocupa, usá un token de 40+ caracteres.
+> Con `TOKEN` vacío no se valida clave: quien tenga la URL puede escribir en la
+> hoja. Sirve para probar. Cuando funcione, poné una clave en el script, creá una
+> **versión nueva** y pegala en la app.
 
-## 2. En la app
+## Si cambiás el script
 
-1. Entrá como admin (PIN `9999`).
-2. **Subir a Google** → pegá la URL `/exec` y el token → **Guardar**.
-3. **Subir cierre** → confirmar.
-
-La hoja “Cierre” se crea sola con encabezados:
-
-`ID · Fecha · Hora · Técnico · Local · Cliente · Teléfono · Vehículo · Tipo · Estado · Monto · Observaciones · Fotos · Subido`
-
-## Detalles
-
-- **No duplica**: el script salta los IDs que ya están en la hoja. Podés subir
-  varias veces el mismo día sin miedo.
-- **Fotos**: por ahora sube el **número** de fotos, no los archivos. Las fotos se
-  descargan desde la app (por visita o ZIP del día).
-- **Si cambia una cita después de subir**, la fila vieja queda. El cierre es una
-  foto del momento, no un espejo. Si necesitás corrección, se edita la hoja.
-- El script **no** requiere Google Cloud ni facturación.
+Siempre: **Implementar → Administrar implementaciones → lápiz → Nueva versión →
+Implementar**. Sin eso, la web app sigue corriendo el código viejo (es la causa
+más común de “Token inválido” o de que no aparezca la hoja).
 
 ## Probar que quedó bien
 

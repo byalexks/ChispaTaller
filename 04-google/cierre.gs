@@ -1,21 +1,11 @@
 /**
  * Chispa Taller — receptor del cierre diario.
  *
- * 1. Creá una hoja de cálculo nueva.
- * 2. Extensiones → Apps Script.
- * 3. Pegá este archivo completo.
- * 4. Cambiá TOKEN por una clave larga cualquiera (la misma que pongas en la app).
- * 5. Implementar → Nueva implementación → Aplicación web
- *    - Ejecutar como: Yo
- *    - Quién tiene acceso: Cualquier usuario
- * 6. Copiá la URL que termina en /exec y pegala en la app:
- *    Administración → Subir a Google.
- *
- * El script crea la hoja "Cierre" con encabezados la primera vez.
- * Si subís el mismo día dos veces, no duplica: salta los IDs que ya están.
+ * MODO PRUEBA: TOKEN vacío = no pide clave. Cualquiera con la URL puede escribir.
+ * Cuando confirmes que funciona, poné una clave larga acá y en la app.
  */
 
-const TOKEN = "CAMBIA_ESTE_TOKEN_POR_UNA_CLAVE_LARGA";
+const TOKEN = "";
 const SHEET_NAME = "Cierre";
 
 const HEADERS = [

@@ -345,6 +345,29 @@ export default function App() {
     }
   }
 
+  async function testUpload() {
+    const url = uploadUrl.trim();
+    if (!url) {
+      showToast("Pegá la URL del Apps Script primero", "error");
+      return;
+    }
+    try {
+      const response = await fetch(url, { method: "GET" });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        tokenConfigurado?: boolean;
+      };
+      if (data?.ok) {
+        showToast(data.tokenConfigurado ? "Conexión OK · con token" : "Conexión OK · sin token");
+      } else {
+        showToast(data?.error ?? "Respuesta inesperada", "error");
+      }
+    } catch {
+      showToast("No se pudo conectar con el script", "error");
+    }
+  }
+
   async function manualUpload() {
     if (!uploadUrl.trim()) {
       setToast("Configurá la URL del Apps Script en Mi perfil");
@@ -1087,6 +1110,7 @@ export default function App() {
           autoUpload={autoUpload}
           uploading={autoUploading}
           onManualUpload={() => void manualUpload()}
+          onTestUpload={() => void testUpload()}
           onSaveUpload={(url, token, auto) => {
             setUploadUrl(url);
             setUploadToken(token);
@@ -2800,6 +2824,7 @@ function ProfileSheet({
   onSaveUpload,
   uploading,
   onManualUpload,
+  onTestUpload,
   onToast,
   onClose,
   onSaved,
@@ -2820,6 +2845,7 @@ function ProfileSheet({
   onSaveUpload: (url: string, token: string, auto: boolean) => void;
   uploading: boolean;
   onManualUpload: () => void;
+  onTestUpload: () => void;
   onToast: (message: string) => void;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
@@ -3088,14 +3114,23 @@ function ProfileSheet({
               Guardar
             </button>
           </div>
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={onManualUpload}
-            className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand disabled:opacity-60"
-          >
-            {uploading ? "Subiendo…" : "Subir ahora"}
-          </button>
+          <div className="mt-1 grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={onTestUpload}
+              className="h-9 rounded-lg border border-line text-[11px] font-semibold text-muted"
+            >
+              Probar
+            </button>
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={onManualUpload}
+              className="h-9 rounded-lg border border-line text-[11px] font-semibold text-brand disabled:opacity-60"
+            >
+              {uploading ? "Subiendo…" : "Subir ahora"}
+            </button>
+          </div>
         </div>
 
         {error && <p className="rounded-lg bg-danger-soft px-2 py-1.5 text-xs text-danger">{error}</p>}
