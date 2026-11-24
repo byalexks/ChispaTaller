@@ -15,6 +15,7 @@ import {
   deleteTechnician,
   findMatch,
   getAdminPin,
+  getSetting,
   photosForAppointment,
   getTechnician,
   historyForClient,
@@ -30,6 +31,7 @@ import {
   seedDemoData,
   setAdminPin,
   setAppointmentStatus,
+  setSetting,
   suggestLocationId,
   todayIso,
   updateScheduleBlock,
@@ -189,6 +191,9 @@ export default function App() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
+  const [closingReminder, setClosingReminder] = useState(false);
+  const [backupDays, setBackupDays] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dim">(() => {
@@ -223,7 +228,49 @@ export default function App() {
     setWeek(weekDays);
     setLocations(locationList);
     setClients(clientList);
+
+    const [backup, closing] = await Promise.all([
+      getSetting("lastBackupAt"),
+      getSetting("closingReminder"),
+    ]);
+    setLastBackupAt(backup);
+    setClosingReminder(closing === "1");
+    if (backup) {
+      const days = Math.floor((Date.now() - new Date(backup).getTime()) / 86_400_000);
+      setBackupDays(days >= 7 ? days : null);
+    } else {
+      setBackupDays(999);
+    }
   }, [technician]);
+
+  useEffect(() => {
+    if (!closingReminder) return;
+
+    const check = async () => {
+      const now = new Date();
+      if (now.getHours() < 18) return;
+      const today = todayIso();
+      if ((await getSetting("lastClosingPrompt")) === today) return;
+      await setSetting("lastClosingPrompt", today);
+      setToast("Cierre del día: exportá el resumen desde el perfil.");
+    };
+
+    void check();
+    const timer = setInterval(() => void check(), 60_000);
+    return () => clearInterval(timer);
+  }, [closingReminder]);
+
+  async function toggleClosingReminder(value: boolean) {
+    setClosingReminder(value);
+    await setSetting("closingReminder", value ? "1" : "0");
+  }
+
+  async function markBackupDone() {
+    const now = new Date().toISOString();
+    setLastBackupAt(now);
+    setBackupDays(null);
+    await setSetting("lastBackupAt", now);
+  }
 
   useEffect(() => {
     void (async () => {
@@ -515,6 +562,8 @@ export default function App() {
             availability={availability}
             onAdd={() => setSheet("actions")}
             onOpen={setVisit}
+            backupDays={backupDays}
+            onBackup={() => setProfileOpen(true)}
           />
         )}
         {view === "inbox" && (
@@ -684,6 +733,10 @@ export default function App() {
       {profileOpen && (
         <ProfileSheet
           technician={technician}
+          lastBackupAt={lastBackupAt}
+          closingReminder={closingReminder}
+          onToggleClosing={(value) => void toggleClosingReminder(value)}
+          onBackupDone={() => void markBackupDone()}
           onClose={() => setProfileOpen(false)}
           onSaved={async () => {
             const updated = await getTechnician(technician.id);
@@ -709,17 +762,33 @@ function TodayView({
   availability,
   onAdd,
   onOpen,
+  backupDays,
+  onBackup,
 }: {
   appointments: Appointment[];
   availability: AvailabilityBlock[];
   onAdd: () => void;
   onOpen: (appointment: Appointment) => void;
+  backupDays: number | null;
+  onBackup: () => void;
 }) {
   const morning = appointments.filter((item) => windowOf(item.type) === "morning");
   const afternoon = appointments.filter((item) => windowOf(item.type) === "afternoon");
 
   return (
     <div className="space-y-6">
+      {backupDays !== null && (
+        <button
+          type="button"
+          onClick={onBackup}
+          className="w-full rounded-xl bg-warn-soft px-3 py-2 text-left text-[11px] font-medium text-warn"
+        >
+          <b>Respaldo pendiente.</b>{" "}
+          {backupDays === 999 ? "Nunca exportaste." : `Hace ${backupDays} días que no respaldás.`}{" "}
+          Tocá para abrir Mi perfil.
+        </button>
+      )}
+
       {availability.length === 0 && (
         <p className="rounded-2xl border border-dashed border-line bg-surface/60 p-4 text-sm text-muted">
           Hoy no hay horario configurado.
@@ -2106,11 +2175,19 @@ function ScheduleSheet({
 
 function ProfileSheet({
   technician,
+  lastBackupAt,
+  closingReminder,
+  onToggleClosing,
+  onBackupDone,
   onClose,
   onSaved,
   onLogout,
 }: {
   technician: Technician;
+  lastBackupAt: string | null;
+  closingReminder: boolean;
+  onToggleClosing: (value: boolean) => void;
+  onBackupDone: () => void;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   onLogout: () => void;
@@ -2131,6 +2208,7 @@ function ProfileSheet({
     link.download = `agenda-respaldo-${todayIso()}.json`;
     link.click();
     URL.revokeObjectURL(url);
+    onBackupDone();
   }
 
   async function save() {
@@ -2237,6 +2315,30 @@ function ProfileSheet({
               />
             </label>
           </div>
+        </div>
+
+        <div className="rounded-xl border border-line bg-surface p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold">Aviso de cierre</p>
+              <p className="text-[10px] text-muted">A las 18:00, si la app está abierta.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onToggleClosing(!closingReminder)}
+              className={`h-9 shrink-0 rounded-lg px-3 text-[11px] font-semibold ${
+                closingReminder
+                  ? "bg-brand-solid text-white"
+                  : "border border-line bg-canvas text-muted"
+              }`}
+            >
+              {closingReminder ? "Activado" : "Desactivado"}
+            </button>
+          </div>
+          <p className="mt-2 text-[10px] text-muted">
+            Último respaldo:{" "}
+            {lastBackupAt ? new Date(lastBackupAt).toLocaleString("es-CO") : "nunca"}
+          </p>
         </div>
 
         {error && <p className="rounded-lg bg-danger-soft px-2 py-1.5 text-xs text-danger">{error}</p>}

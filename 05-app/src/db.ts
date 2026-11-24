@@ -297,6 +297,16 @@ export function getDb(): Promise<AgendaDB> {
   return dbPromise;
 }
 
+export async function getSetting(key: string): Promise<string | null> {
+  const db = await getDb();
+  return (await db.get("settings", key)) ?? null;
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  const db = await getDb();
+  await db.put("settings", value, key);
+}
+
 export async function listTechnicians(includeInactive = false): Promise<Technician[]> {
   const db = await getDb();
   const items = await db.getAll("technicians");
