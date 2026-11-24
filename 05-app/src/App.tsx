@@ -155,7 +155,7 @@ const WINDOW_LABEL: Record<"morning" | "afternoon", string> = {
   afternoon: "Jornada tarde",
 };
 
-const APP_VERSION = "0.2.2";
+const APP_VERSION = "0.3.0";
 
 const longDate = new Intl.DateTimeFormat("es-CO", {
   weekday: "long",
@@ -3214,11 +3214,9 @@ function ProfileSheet({
   }
 
   async function saveUploadConfig() {
-    await setSetting("uploadUrl", uploadForm.url.trim());
-    await setSetting("uploadToken", uploadForm.token.trim());
     await setSetting("autoUpload", uploadForm.auto ? "1" : "0");
     onToast("Cierre automático guardado");
-    onSaveUpload(uploadForm.url.trim(), uploadForm.token.trim(), uploadForm.auto);
+    onSaveUpload(uploadUrl, uploadToken, uploadForm.auto);
   }
 
   async function handleExport() {
@@ -3428,20 +3426,24 @@ function ProfileSheet({
               </span>
             )}
           </div>
-          <input
-            value={uploadForm.url}
-            onChange={(event) => setUploadForm({ ...uploadForm, url: event.target.value })}
-            placeholder="URL del Apps Script (/exec)"
-            aria-label="URL del Apps Script"
-            className="mt-2 w-full rounded-lg border border-line bg-canvas px-2 py-2 text-[11px] outline-none focus:border-brand"
-          />
-          <input
-            value={uploadForm.token}
-            onChange={(event) => setUploadForm({ ...uploadForm, token: event.target.value })}
-            placeholder="Token"
-            aria-label="Token del Apps Script"
-            className="mt-1 w-full rounded-lg border border-line bg-canvas px-2 py-2 text-[11px] outline-none focus:border-brand"
-          />
+          <div className="mt-2 rounded-lg border border-line bg-canvas px-2 py-2 text-[10px]">
+            <p className="font-semibold text-muted">Conexión configurada</p>
+            <p className="mt-0.5 text-muted">
+              URL:{" "}
+              <span className="font-mono">
+                {uploadForm.url ? "••••••••" : "sin configurar"}
+              </span>
+            </p>
+            <p className="text-muted">
+              Token:{" "}
+              <span className="font-mono">
+                {uploadForm.token ? "••••••••" : "sin configurar"}
+              </span>
+            </p>
+            <p className="mt-1 text-muted">
+              Solo el administrador puede verla o cambiarla desde Administración.
+            </p>
+          </div>
           <div className="mt-1 grid grid-cols-2 gap-1">
             <button
               type="button"
