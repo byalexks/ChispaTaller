@@ -2064,6 +2064,29 @@ function VisitSheet({
   }
 
   const visible = photos.filter((photo) => !removed.includes(photo.id));
+  const placeName =
+    locations.find((location) => location.id === appointment.locationId)?.name ?? "";
+
+  const calendarUrl = (() => {
+    if (!appointment.date || !appointment.time) return null;
+    const day = appointment.date.replace(/-/g, "");
+    const start = `${day}T${appointment.time.replace(":", "")}00`;
+    const endHour = appointment.endTime
+      ? appointment.endTime
+      : `${String(Number(appointment.time.slice(0, 2)) + 1).padStart(2, "0")}:00`;
+    const end = `${day}T${endHour.replace(":", "")}00`;
+    const params = new URLSearchParams({
+      action: "TEMPLATE",
+      text: `${appointment.type ? TYPE_LABEL[appointment.type] : "Cita"} · ${
+        appointment.name ?? ""
+      }`,
+      dates: `${start}/${end}`,
+      ctz: "America/Bogota",
+      details: `${appointment.description ?? ""}\nCita: ${appointment.id}`,
+      location: placeName,
+    });
+    return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  })();
 
   async function downloadPhotos() {
     for (const [index, photo] of visible.entries()) {
@@ -2115,6 +2138,17 @@ function VisitSheet({
             </div>
           );
         })()}
+
+        {calendarUrl && (
+          <a
+            href={calendarUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="grid h-10 w-full place-items-center rounded-xl border border-line bg-surface text-xs font-semibold text-ink"
+          >
+            Añadir a Google Calendar
+          </a>
+        )}
 
         <div>
           <p className="mb-1 text-xs font-semibold text-muted">

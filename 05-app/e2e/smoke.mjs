@@ -145,6 +145,12 @@ try {
 
   await step("descargar la foto de la visita", async () => {
     await page.getByText("Engerling Marrugo", { exact: true }).first().click();
+    const href = await page
+      .getByRole("link", { name: "Añadir a Google Calendar" })
+      .getAttribute("href");
+    if (!href?.includes("calendar.google.com")) {
+      throw new Error("Falta el enlace a Google Calendar");
+    }
     const [download] = await Promise.all([
       page.waitForEvent("download"),
       page.getByRole("button", { name: /Descargar 1 foto/ }).click(),
