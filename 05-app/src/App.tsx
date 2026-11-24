@@ -1177,14 +1177,13 @@ function Toast({ message, kind = "ok" }: { message: string | null; kind?: "ok" |
           className="h-3.5 w-3.5 text-red-400"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2.5"
+          strokeWidth="3"
           strokeLinecap="round"
           strokeLinejoin="round"
           aria-hidden="true"
         >
-          <path d="M12 8v5" />
-          <path d="M12 17h.01" />
-          <circle cx="12" cy="12" r="9" />
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
         </svg>
       )}
       {message}
