@@ -101,15 +101,15 @@ try {
   await step("crear datos de prueba del técnico", async () => {
     await page.getByRole("button", { name: "Crear datos" }).first().click();
     await page.getByRole("button", { name: "Crear", exact: true }).click();
-    await pause(900);
-    await page.getByText(/citas/).first().waitFor();
+    await page.getByText("Creando la tanda grande…").waitFor();
+    await page.getByText(/citas, .* mensajes y .* fotos de prueba/).waitFor({ timeout: 120_000 });
   });
 
   await step("crear datos dos veces no duplica", async () => {
     await page.getByRole("button", { name: "Crear datos" }).first().click();
     await page.getByRole("button", { name: "Crear", exact: true }).click();
-    await pause(900);
-    await page.getByText(/citas de prueba creadas/).first().waitFor();
+    await page.getByText("Creando la tanda grande…").waitFor();
+    await page.getByText(/citas, .* mensajes y .* fotos de prueba/).waitFor({ timeout: 120_000 });
   });
 
   await step("volver al login", async () => {
@@ -239,8 +239,10 @@ try {
       throw new Error("El JSON no tiene la forma esperada");
     }
     console.log(`  JSON: ${data.totalCitas} citas en ${data.dias.length} días`);
-    if (data.totalCitas !== 21) {
-      throw new Error(`Se esperaban 21 citas (20 demo + 1 manual), llegaron ${data.totalCitas}`);
+    if (data.totalCitas < 100 || data.totalCitas > 350) {
+      throw new Error(
+        `Cantidad de citas fuera de rango (¿duplicadas?): ${data.totalCitas}`
+      );
     }
   });
 
@@ -315,7 +317,7 @@ CANCELADO`;
     await page.getByText("Pegar mensaje de WhatsApp", { exact: false }).click();
 
     const target = new Date();
-    target.setDate(target.getDate() + 6);
+    target.setDate(target.getDate() + 70);
     const readable = target.toLocaleDateString("es-CO", {
       day: "numeric",
       month: "long",
@@ -352,7 +354,7 @@ Problema: se reprograma porque la clienta viaja.`;
     await page.getByText("Pegar mensaje de WhatsApp", { exact: false }).click();
 
     const target = new Date();
-    target.setDate(target.getDate() + 8);
+    target.setDate(target.getDate() + 90);
     while ([0, 6].includes(target.getDay())) target.setDate(target.getDate() + 1);
     const readable = target.toLocaleDateString("es-CO", {
       day: "numeric",

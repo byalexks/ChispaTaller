@@ -676,11 +676,12 @@ export async function saveDrafts(
     matchId?: string | null;
   })[],
   technicianId: string
-): Promise<{ saved: number; inbox: number }> {
+): Promise<{ saved: number; inbox: number; ids: string[] }> {
   const db = await getDb();
   const locations = await listLocations();
   let saved = 0;
   let inbox = 0;
+  const ids: string[] = [];
 
   for (const draft of drafts) {
     const messageId = await nextId(db, "messages", "M");
@@ -700,6 +701,7 @@ export async function saveDrafts(
         appointmentId: draft.matchId,
         inInbox: 0,
       });
+      ids.push(draft.matchId);
       saved += 1;
       continue;
     }
@@ -755,10 +757,11 @@ export async function saveDrafts(
       appointmentId: appointment.id,
       inInbox: 0,
     });
+    ids.push(appointment.id);
     saved += 1;
   }
 
-  return { saved, inbox };
+  return { saved, inbox, ids };
 }
 
 export async function countAppointments(technicianId: string): Promise<number> {
@@ -817,8 +820,172 @@ const DEMO: DemoEntry[] = [
 
 export const DEMO_COUNT = DEMO.length;
 
-/** Creates believable demo appointments for one technician, to test the UI. */
-export async function seedDemoData(technicianId: string): Promise<number> {
+const DEMO_FIRST = [
+  "Alejandro",
+  "Beatriz",
+  "Carlos",
+  "Daniela",
+  "Eduardo",
+  "Fernanda",
+  "Gabriel",
+  "Gloria",
+  "Hernán",
+  "Isabel",
+  "Javier",
+  "Juliana",
+  "Kevin",
+  "Laura",
+  "Manuel",
+  "Natalia",
+  "Patricia",
+  "Ricardo",
+  "Sandra",
+  "Tomás",
+  "Úrsula",
+  "Víctor",
+  "Wendy",
+  "Ximena",
+  "Yamile",
+  "Zulma",
+  "Adriana",
+  "Bernardo",
+  "Cecilia",
+  "Damián",
+];
+
+const DEMO_LAST = [
+  "Gómez",
+  "Rodríguez",
+  "Martínez",
+  "García",
+  "López",
+  "Hernández",
+  "Pérez",
+  "Sánchez",
+  "Ramírez",
+  "Torres",
+  "Flórez",
+  "Mendoza",
+  "Castro",
+  "Rojas",
+  "Vargas",
+];
+
+const DEMO_MODELS = [
+  "galaxy 3",
+  "stareer 3",
+  "Ledo 3",
+  "Kia Picanto",
+  "Renault Kwid",
+  "Chevrolet Spark GT",
+  "Nissan March",
+  "Hyundai Grand i10",
+  "Suzuki Alto",
+  "BYD Dolphin",
+];
+
+const DEMO_TYPES: ServiceType[] = ["maintenance", "revision", "warranty", "part"];
+
+const DEMO_SLOTS = ["08:00", "09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00"];
+
+const DEMO_LOCATIONS = ["cartagena-1", "cartagena-2", "cartagena-3", "cartagena-4", "cartagena-5", "turbaco"];
+
+const DEMO_DESCRIPTIONS = [
+  "El cliente reporta ruido al frenar.",
+  "No enciende desde ayer.",
+  "Revisión general antes de un viaje.",
+  "La batería se descarga rápido.",
+  "Cambio de repuesto por garantía.",
+  "Vibración en la dirección.",
+  "El cargador no reconoce el vehículo.",
+  "Mantenimiento de los 5.000 km.",
+];
+
+const DEMO_NOTES = [
+  "Se revisó el sistema y quedó funcionando.",
+  "Se cambió el repuesto y se probó en ruta.",
+  "Cliente avisó que llegará más tarde.",
+  "Se ajustaron frenos y se entregó.",
+  "Pendiente una pieza para la próxima visita.",
+  "Se hizo diagnóstico completo sin novedades.",
+];
+
+const DEMO_INBOX = [
+  "Buenas, necesito saber si me pueden revisar el carro mañana en la tarde.",
+  "Hola, ¿cuánto cuesta el mantenimiento del galaxy 3?",
+  "Buen día, ¿me pueden agendar para el sábado?",
+  "Señor, el carro sigue haciendo un ruido raro. ¿Qué hago?",
+  "Buenas tardes, quiero cambiar la cita del jueves.",
+  "Hola, ¿tienen repuesto para el Ledo 3?",
+  "Necesito una revisión urgente, el carro no carga.",
+  "¿Me pueden confirmar la hora de mañana?",
+  "Buenas, soy cliente nuevo. ¿Cómo hago para agendar?",
+  "Me gustaría saber si la garantía cubre la batería.",
+  "Hola, no puedo ir hoy. ¿Lo pasamos para la otra semana?",
+  "¿El taller abre el domingo?",
+  "Buenas, ¿me pasan el precio de la revisión?",
+  "El carro quedó sin frenos, necesito ayuda.",
+  "Hola, ¿puedo llevar el carro a las 5?",
+  "Buenas, quiero saber si ya está listo mi vehículo.",
+  "¿Me pueden enviar la factura por WhatsApp?",
+  "Necesito reprogramar porque estoy fuera de la ciudad.",
+  "Buenas, ¿atienden en Turbaco?",
+  "Hola, el testigo de la batería sigue encendido.",
+  "¿Cuánto se demora el cambio de flasher?",
+  "Buenas, quiero agendar mantenimiento para dos carros.",
+  "Me recomendaron el taller. ¿Tienen cupo esta semana?",
+  "Hola, ¿puedo pagar con tarjeta?",
+];
+
+function demoClientName(index: number): string {
+  const first = DEMO_FIRST[index % DEMO_FIRST.length];
+  const last = DEMO_LAST[Math.floor(index / DEMO_FIRST.length) % DEMO_LAST.length];
+  return `${first} ${last}`;
+}
+
+/** Small JPEG generated in the browser, used as demo evidence. */
+async function demoPhoto(label: string, hue: number): Promise<Blob | null> {
+  if (typeof document === "undefined") return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 480;
+  canvas.height = 360;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+
+  const gradient = context.createLinearGradient(0, 0, 480, 360);
+  gradient.addColorStop(0, `hsl(${hue}, 42%, 28%)`);
+  gradient.addColorStop(1, `hsl(${hue + 45}, 55%, 48%)`);
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 480, 360);
+
+  context.fillStyle = "rgba(255,255,255,0.94)";
+  context.font = "bold 30px system-ui, sans-serif";
+  context.fillText("Chispa Taller", 28, 64);
+  context.font = "20px system-ui, sans-serif";
+  context.fillText(label.slice(0, 34), 28, 110);
+  context.fillText("Evidencia de prueba", 28, 144);
+  context.strokeStyle = "rgba(255,255,255,0.45)";
+  context.lineWidth = 2;
+  context.strokeRect(24, 180, 432, 150);
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.72);
+  });
+}
+
+type SeedDraft = Draft & { locationId: string | null };
+
+/**
+ * Creates a large, believable dataset for one technician: clients, appointments
+ * across past and future weeks, photos, and inbox messages. Re-seeding replaces
+ * the previous demo data instead of duplicating it.
+ */
+export async function seedDemoData(technicianId: string): Promise<{
+  appointments: number;
+  messages: number;
+  photos: number;
+}> {
   const db = await getDb();
   const base = todayIso();
 
@@ -827,10 +994,10 @@ export async function seedDemoData(technicianId: string): Promise<number> {
   const demos = existing.filter((appointment) =>
     (appointment.originalText ?? "").startsWith("Datos de prueba")
   );
+  const storedMessages = await db.getAll("messages");
 
-  if (demos.length) {
+  if (demos.length || storedMessages.some((message) => message.demo)) {
     const ids = new Set(demos.map((appointment) => appointment.id));
-    const messages = await db.getAll("messages");
     const tx = db.transaction(["appointments", "messages", "photos"], "readwrite");
     for (const appointment of demos) {
       await tx.objectStore("appointments").delete(appointment.id);
@@ -840,18 +1007,21 @@ export async function seedDemoData(technicianId: string): Promise<number> {
         await tx.objectStore("photos").delete(photoId);
       }
     }
-    for (const message of messages) {
-      if (message.appointmentId && ids.has(message.appointmentId)) {
+    for (const message of storedMessages) {
+      if (
+        (message.appointmentId && ids.has(message.appointmentId)) ||
+        message.demo
+      ) {
         await tx.objectStore("messages").delete(message.id);
       }
     }
     await tx.done;
   }
 
-  const drafts = DEMO.map((entry) => {
+  const curated: SeedDraft[] = DEMO.map((entry) => {
     const date = isoWithOffset(base, entry.day);
     const hour = Number(entry.time.slice(0, 2));
-    const draft: Draft = {
+    return {
       type: entry.type,
       secondaryType: entry.part ? "part" : null,
       status: entry.status,
@@ -873,6 +1043,7 @@ export async function seedDemoData(technicianId: string): Promise<number> {
       plate: null,
       serial: null,
       extras: {},
+      locationId: null,
       originalText: `Datos de prueba · ${entry.name}`,
       receivedAt: new Date().toISOString(),
       alerts: dataAlerts({
@@ -881,21 +1052,185 @@ export async function seedDemoData(technicianId: string): Promise<number> {
         unknownLocation: entry.location ?? null,
       }),
     };
-    return draft;
   });
 
+  const curatedKeys = new Set(curated.map((draft) => `${draft.date}|${draft.time}`));
+  const generated: SeedDraft[] = [];
+  let clientIndex = 0;
+  let sequence = 0;
+
+  for (let offset = -42; offset <= 42; offset += 1) {
+    // The current week already has the curated examples (Hoy, Semana, tests).
+    if (offset >= 0 && offset <= 5) continue;
+
+    const date = isoWithOffset(base, offset);
+    if (weekdayOf(date) === 0) continue; // no schedule on Sundays
+
+    const count = 2 + (Math.abs(offset) % 3);
+    const start = Math.abs(offset) % DEMO_SLOTS.length;
+
+    for (let slot = 0; slot < count; slot += 1) {
+      const time = DEMO_SLOTS[(start + slot * 2) % DEMO_SLOTS.length];
+      if (curatedKeys.has(`${date}|${time}`)) continue;
+
+      const past = offset < 0;
+      const pick = (Math.abs(offset) + slot) % 10;
+      const status: AppointmentStatus = past
+        ? pick < 6
+          ? "attended"
+          : pick < 8
+            ? "no_show"
+            : pick < 9
+              ? "cancelled"
+              : "rescheduled"
+        : pick < 4
+          ? "scheduled"
+          : pick < 7
+            ? "to_confirm"
+            : pick < 9
+              ? "confirmed"
+              : "rescheduled";
+
+      const type = DEMO_TYPES[(Math.abs(offset) + slot) % DEMO_TYPES.length];
+      const name = demoClientName(clientIndex % 80);
+      const phone = `3${String(10 + (sequence % 90)).padStart(2, "0")}${String(
+        1000000 + ((sequence * 7919) % 9000000)
+      )}`;
+      const model = DEMO_MODELS[(Math.abs(offset) + slot) % DEMO_MODELS.length];
+      const amount =
+        status === "attended" || status === "confirmed"
+          ? 120000 + (sequence % 6) * 30000
+          : null;
+      const hour = Number(time.slice(0, 2));
+
+      generated.push({
+        type,
+        secondaryType: type === "part" ? "part" : null,
+        status,
+        name,
+        model,
+        date,
+        weekday: weekdayOf(date),
+        time,
+        endTime: `${String(hour + 1).padStart(2, "0")}:00`,
+        isWindow: true,
+        phone,
+        location: null,
+        address: null,
+        part: type === "part" ? "flasher" : null,
+        description: DEMO_DESCRIPTIONS[(Math.abs(offset) + slot) % DEMO_DESCRIPTIONS.length],
+        instructions: null,
+        amount,
+        payment: amount ? "paid" : "pending",
+        plate: null,
+        serial: null,
+        extras: {},
+        locationId: DEMO_LOCATIONS[(Math.abs(offset) + slot) % DEMO_LOCATIONS.length],
+        originalText: `Datos de prueba · ${name}`,
+        receivedAt: new Date(`${date}T12:00:00`).toISOString(),
+        alerts: [],
+      });
+
+      clientIndex += 1;
+      sequence += 1;
+    }
+  }
+
+  const drafts = [...curated, ...generated];
   const result = await saveDrafts(drafts, technicianId);
-  return result.saved;
+  const generatedIds = result.ids.slice(curated.length);
+
+  // Notes, closing dates and photo evidence for the generated history.
+  const allAppointments = await db.getAll("appointments");
+  const byId = new Map(allAppointments.map((appointment) => [appointment.id, appointment]));
+  const photoRecords: VisitPhoto[] = [];
+  const updates: Appointment[] = [];
+  let photoCount = 0;
+
+  for (let index = 0; index < generated.length; index += 1) {
+    const entry = generated[index];
+    const id = generatedIds[index];
+    const appointment = byId.get(id);
+    if (!appointment) continue;
+
+    const closed = entry.status === "attended" || entry.status === "no_show";
+    const notes =
+      closed || entry.status === "cancelled"
+        ? DEMO_NOTES[index % DEMO_NOTES.length]
+        : appointment.notes;
+    let photoIds =
+      appointment.photoIds ?? (appointment.photoId ? [appointment.photoId] : []);
+
+    if (entry.status === "attended" && index % 4 === 0) {
+      const shots = index % 8 === 0 ? 2 : 1;
+      for (let shot = 0; shot < shots; shot += 1) {
+        const blob = await demoPhoto(
+          `${entry.name ?? "Cliente"} · ${entry.date ?? ""}`,
+          (index * 37 + shot * 60) % 360
+        );
+        if (!blob) continue;
+        const photoId = await nextId(db, "photos", "P");
+        photoRecords.push({
+          id: photoId,
+          appointmentId: id,
+          blob,
+          mimeType: "image/jpeg",
+          createdAt: new Date().toISOString(),
+        });
+        photoIds = [...photoIds, photoId];
+        photoCount += 1;
+      }
+    }
+
+    updates.push({
+      ...appointment,
+      notes: notes ?? null,
+      closedAt: closed
+        ? new Date(`${entry.date ?? base}T18:00:00`).toISOString()
+        : appointment.closedAt,
+      photoIds,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  if (photoRecords.length || updates.length) {
+    const tx = db.transaction(["appointments", "photos"], "readwrite");
+    for (const photo of photoRecords) {
+      await tx.objectStore("photos").put(photo);
+    }
+    for (const appointment of updates) {
+      await tx.objectStore("appointments").put(appointment);
+    }
+    await tx.done;
+  }
+
+  // Inbox messages the technician can practice classifying.
+  let messageCount = 0;
+  for (let index = 0; index < DEMO_INBOX.length; index += 1) {
+    const id = await nextId(db, "messages", "M");
+    await db.put("messages", {
+      id,
+      text: DEMO_INBOX[index],
+      receivedAt: new Date(Date.now() - (index + 1) * 3_600_000).toISOString(),
+      appointmentId: null,
+      inInbox: 1,
+      demo: true,
+    });
+    messageCount += 1;
+  }
+
+  return { appointments: result.saved, messages: messageCount, photos: photoCount };
 }
 
 /** Deletes every appointment (and its photo) of one technician. Clients stay shared. */
 export async function clearTechnicianData(technicianId: string): Promise<number> {
   const db = await getDb();
   const appointments = await db.getAllFromIndex("appointments", "byTechnician", technicianId);
-  if (!appointments.length) return 0;
+  const messages = await db.getAll("messages");
+  const demoMessages = messages.filter((message) => message.demo);
+  if (!appointments.length && !demoMessages.length) return 0;
 
   const ids = new Set(appointments.map((appointment) => appointment.id));
-  const messages = await db.getAll("messages");
 
   const tx = db.transaction(["appointments", "messages", "photos"], "readwrite");
   for (const appointment of appointments) {
@@ -907,7 +1242,7 @@ export async function clearTechnicianData(technicianId: string): Promise<number>
     }
   }
   for (const message of messages) {
-    if (message.appointmentId && ids.has(message.appointmentId)) {
+    if ((message.appointmentId && ids.has(message.appointmentId)) || message.demo) {
       await tx.objectStore("messages").delete(message.id);
     }
   }

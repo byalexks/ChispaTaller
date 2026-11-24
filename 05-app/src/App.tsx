@@ -15,7 +15,6 @@ import {
   createTechnician,
   deleteMessage,
   deleteTechnician,
-  DEMO_COUNT,
   findMatch,
   getAdminPin,
   getClient,
@@ -54,9 +53,12 @@ import { compressPhoto } from "./images";
 import { dataAlerts } from "./alerts";
 import { exportBackup, importBackup } from "./backup";
 import {
+  connect as connectGoogle,
   deleteEvent as deleteGoogleEvent,
   insertEvent as insertGoogleEvent,
+  isConnected as isGoogleConnected,
   patchEvent as patchGoogleEvent,
+  DEFAULT_CLIENT_ID,
   type GoogleEvent,
 } from "./google";
 import { downloadCsv, downloadJson, downloadBlob, safeFileName } from "./export";
@@ -285,7 +287,7 @@ export default function App() {
     setUploadUrl(url ?? "");
     setUploadToken(token ?? "");
     setAutoUpload(auto === "1");
-    setGoogleConnected(Boolean(url?.trim() && token?.trim()));
+    setGoogleConnected(isGoogleConnected());
     if (backup) {
       const days = Math.floor((Date.now() - new Date(backup).getTime()) / 86_400_000);
       setBackupDays(days >= 7 ? days : null);
@@ -629,7 +631,6 @@ export default function App() {
     const time = appointment.time as string;
     const endTime =
       appointment.endTime ?? `${String(Number(time.slice(0, 2)) + 1).padStart(2, "0")}:00`;
-    const offset = "-05:00"; // Colombia, no daylight saving.
 
     return {
       summary: `${appointment.type ? TYPE_LABEL[appointment.type] : "Cita"} · ${
@@ -637,16 +638,16 @@ export default function App() {
       }`,
       location: place,
       description: `Cita ${appointment.id} · ${STATUS_LABEL[appointment.status]}`,
-      start: `${day}T${time}:00${offset}`,
-      end: `${day}T${endTime}:00${offset}`,
+      start: { dateTime: `${day}T${time}:00`, timeZone: "America/Bogota" },
+      end: { dateTime: `${day}T${endTime}:00`, timeZone: "America/Bogota" },
     };
   }
 
   async function syncGoogle(force = false, quiet = false) {
-    const url = uploadUrl.trim();
-    const token = uploadToken.trim();
-    if (!technician || !url || !token || syncing) {
-      if (!quiet && !url) setToast("Configurá la URL y el token en Mi perfil");
+    if (!technician || !isGoogleConnected() || syncing) {
+      if (!quiet && !isGoogleConnected()) {
+        setToast("Conectá Google Calendar en Mi perfil");
+      }
       return;
     }
 
@@ -673,7 +674,7 @@ export default function App() {
 
       for (const appointment of pending) {
         if (appointment.status === "cancelled" && appointment.googleEventId) {
-          await deleteGoogleEvent(url, token, appointment.googleEventId);
+          await deleteGoogleEvent(appointment.googleEventId);
           await updateAppointmentSync(appointment.id, null, new Date().toISOString());
           continue;
         }
@@ -681,15 +682,14 @@ export default function App() {
 
         const body = googleBody(appointment);
         if (appointment.googleEventId) {
-          const eventId = await patchGoogleEvent(
-            url,
-            token,
+          await patchGoogleEvent(appointment.googleEventId, body);
+          await updateAppointmentSync(
+            appointment.id,
             appointment.googleEventId,
-            body
+            new Date().toISOString()
           );
-          await updateAppointmentSync(appointment.id, eventId, new Date().toISOString());
         } else {
-          const eventId = await insertGoogleEvent(url, token, body);
+          const eventId = await insertGoogleEvent(body);
           await updateAppointmentSync(appointment.id, eventId, new Date().toISOString());
         }
       }
@@ -711,6 +711,20 @@ export default function App() {
       }
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleConnectGoogle(clientId: string) {
+    try {
+      await connectGoogle(clientId);
+      setGoogleConnected(true);
+      await syncGoogle(true);
+      setToast("Google Calendar conectado");
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "No se pudo conectar con Google",
+        "error"
+      );
     }
   }
 
@@ -1047,8 +1061,8 @@ export default function App() {
             onOpen={(appointment) => setVisit(appointment)}
             onExport={() => void exportWeek()}
             onSyncGoogle={() => {
-              if (!googleConnected) {
-                setToast("Configurá la URL y el token en Mi perfil");
+              if (!isGoogleConnected()) {
+                setToast("Conectá Google Calendar en Mi perfil");
                 return;
               }
               void syncGoogle(true);
@@ -1278,6 +1292,7 @@ export default function App() {
           onBackupDone={() => void markBackupDone()}
           googleConnected={googleConnected}
           syncing={syncing}
+          onConnectGoogle={handleConnectGoogle}
           onSyncGoogle={() => void syncGoogle(true)}
           uploadUrl={uploadUrl}
           uploadToken={uploadToken}
@@ -1792,7 +1807,7 @@ function WeekView({
           onClick={onSyncGoogle}
           className="text-[11px] font-semibold text-brand"
         >
-          {googleConnected ? "Sincronizar con Google" : "Google Calendar"}
+          {googleConnected ? "Sincronizar con Google" : "Conectar Google"}
         </button>
         <button
           type="button"
@@ -3108,6 +3123,7 @@ function ProfileSheet({
   onBackupDone,
   googleConnected,
   syncing,
+  onConnectGoogle,
   onSyncGoogle,
   uploadUrl,
   uploadToken,
@@ -3128,6 +3144,7 @@ function ProfileSheet({
   onBackupDone: () => void;
   googleConnected: boolean;
   syncing: boolean;
+  onConnectGoogle: (clientId: string) => Promise<void>;
   onSyncGoogle: () => void;
   uploadUrl: string;
   uploadToken: string;
@@ -3149,11 +3166,24 @@ function ProfileSheet({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingImport, setPendingImport] = useState<File | null>(null);
+  const [clientId, setClientId] = useState("");
   const [uploadForm, setUploadForm] = useState({ url: "", token: "", auto: false });
 
   useEffect(() => {
     setUploadForm({ url: uploadUrl, token: uploadToken, auto: autoUpload });
   }, [uploadUrl, uploadToken, autoUpload]);
+
+  useEffect(() => {
+    void getSetting("googleClientId").then((value) =>
+      setClientId(value?.trim() ? value : DEFAULT_CLIENT_ID)
+    );
+  }, []);
+
+  async function saveAndConnect() {
+    const id = clientId.trim() || DEFAULT_CLIENT_ID;
+    await setSetting("googleClientId", id);
+    await onConnectGoogle(id);
+  }
 
   async function saveUploadConfig() {
     await setSetting("uploadUrl", uploadForm.url.trim());
@@ -3322,8 +3352,8 @@ function ProfileSheet({
         <div className="rounded-xl border border-line bg-surface p-3">
           <p className="text-xs font-semibold">Google Calendar</p>
           <p className="text-[10px] text-muted">
-            Sincroniza la semana visible con el Apps Script del cierre. Solo actualiza las
-            citas que cambiaron.
+            Cada técnico conecta su propia cuenta. Los eventos se guardan en su
+            calendario. Sincroniza la semana visible y solo actualiza lo que cambió.
           </p>
           {googleConnected ? (
             <button
@@ -3335,9 +3365,22 @@ function ProfileSheet({
               {syncing ? "Sincronizando…" : "Sincronizar ahora"}
             </button>
           ) : (
-            <p className="mt-2 rounded-lg bg-canvas px-2 py-1.5 text-[10px] text-muted">
-              Usa el mismo Apps Script del cierre. Pegá la URL y el token arriba y guardá.
-            </p>
+            <>
+              <input
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
+                placeholder="Client ID de Google"
+                aria-label="Client ID de Google"
+                className="mt-2 w-full rounded-lg border border-line bg-canvas px-2 py-2 text-[11px] outline-none focus:border-brand"
+              />
+              <button
+                type="button"
+                onClick={() => void saveAndConnect()}
+                className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand"
+              >
+                Conectar con mi cuenta de Google
+              </button>
+            </>
           )}
         </div>
 
@@ -3586,14 +3629,13 @@ function AdminView({
   function seed(technician: Technician) {
     setConfirm({
       title: "Crear datos de prueba",
-      body: `Se van a crear ${DEMO_COUNT} citas de ejemplo para ${technician.name}, repartidas en la semana. Si ya había datos de prueba, se reemplazan (no se duplican).`,
+      body: `Se van a crear más de 180 citas, 80 clientes, 24 mensajes y fotos de evidencia para ${technician.name}, repartidas en varias semanas. Si ya había datos de prueba, se reemplazan (no se duplican).`,
       confirmLabel: "Crear",
       run: async () => {
+        onToast("Creando la tanda grande…");
         const created = await seedDemoData(technician.id);
         onToast(
-          created
-            ? `${created} citas de prueba creadas`
-            : "No se pudieron crear las citas"
+          `${created.appointments} citas, ${created.messages} mensajes y ${created.photos} fotos de prueba`
         );
         await load();
       },

@@ -38,24 +38,45 @@ en cada subida:
 - La fila 1 queda en negrita y congelada.
 
 No hace falta limpiar la hoja de una forma especial: podés borrar las filas y la
-próxima subida la deja lista otra vez. `VERSION` ahora es **5**.
+próxima subida la deja lista otra vez. `VERSION` ahora es **4**.
 
-## Google Calendar (sin OAuth)
+## Google Calendar por técnico (OAuth)
 
-El calendario usa el **mismo Apps Script**, no OAuth. El script crea, actualiza y
-borra los eventos en el **calendario principal de la cuenta dueña del script**
-(la misma del Sheet). Por eso ya no hace falta verificar `github.io` ni agregar
-orígenes en Google Cloud.
+Cada técnico conecta **su propia cuenta de Google** y los eventos se crean en
+**su calendario principal**. La app usa Google Identity Services y el permiso
+`calendar.events`; no hay backend.
 
-- No funciona en el calendario personal de cada técnico: todos los eventos caen
-  en el calendario del administrador. Es el precio de no tener OAuth.
-- La primera vez, Apps Script pide autorización para **Calendar**. Aceptala.
-- En la app: **Mi perfil → Google Calendar → Sincronizar ahora**. También se
-  sincroniza solo al guardar o cambiar una cita.
+### Configurar Google Cloud (una vez)
 
-El script no crea eventos duplicados: guarda el `eventId` de Google en cada cita.
-Si un evento se borra a mano en Google, la próxima sincronización lo vuelve a
-crear.
+1. En <https://console.cloud.google.com> elegí el proyecto del Client ID.
+2. **APIs y servicios → Pantalla de consentimiento de OAuth**:
+   - Tipo de usuario: **Externo**.
+   - Estado de publicación: **Prueba** (Testing).
+   - En **Usuarios de prueba**, agregá el Gmail de **cada técnico**.
+   - En **Permisos**, agregá `.../auth/calendar.events`.
+3. **Credenciales → tu OAuth Client ID (Aplicación web) → Orígenes de JavaScript autorizados**:
+   - `https://byalexks.github.io`
+   - `http://localhost:5173` (para pruebas en el PC)
+   - Sin barra al final.
+4. **No pongas `github.io` en “Dominios autorizados”**: es un dominio compartido y
+   Google no lo puede verificar como tuyo. Ese campo se puede dejar vacío.
+
+### Conectar en cada teléfono
+
+1. Entrá a la app con el técnico.
+2. **Mi perfil → Google Calendar**.
+3. Tocá **Conectar con mi cuenta de Google** y elegí la cuenta de ese técnico.
+4. Si aparece “Google no verificó esta app”:
+   - **Configuración avanzada → Ir a Chispa Taller (no seguro) → Permitir**.
+5. Aceptá el permiso de Calendar.
+
+Después, **Sincronizar ahora** crea los eventos de la semana visible en el
+calendario de ese técnico. También se sincroniza al guardar o cambiar una cita.
+
+> Si Google muestra **“Acceso bloqueado”**, casi siempre es porque la cuenta no
+> está en **Usuarios de prueba** o la app quedó en estado **Publicado** sin
+> verificar. Volvé a **Prueba** y agregá la cuenta. Un dominio propio elimina el
+> aviso, pero hay que comprarlo y verificarlo.
 
 ## Configuración compartida (técnicos, PINs y PIN admin)
 

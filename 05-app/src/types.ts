@@ -168,6 +168,8 @@ export interface InboxMessage {
   receivedAt: string;
   appointmentId: string | null;
   inInbox: number;
+  /** Seeded test data; removed on re-seed or when clearing demo data. */
+  demo?: boolean;
 }
 
 export interface DaySummary {
