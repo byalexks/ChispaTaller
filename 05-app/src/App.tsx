@@ -57,6 +57,7 @@ import {
   type GoogleEvent,
 } from "./google";
 import { downloadCsv, downloadJson, downloadBlob, safeFileName } from "./export";
+import { buildDaily, uploadDaily } from "./daily";
 import { zipSync } from "fflate";
 import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
 import type {
@@ -397,7 +398,7 @@ export default function App() {
     };
   }
 
-  async function syncGoogle(force = false) {
+  async function syncGoogle(force = false, quiet = false) {
     if (!technician || !isGoogleConnected() || syncing) return;
 
     setSyncing(true);
@@ -417,7 +418,7 @@ export default function App() {
       });
 
       if (!pending.length) {
-        setToast("Google Calendar ya está al día");
+        if (!quiet) setToast("Google Calendar ya está al día");
         return;
       }
 
@@ -770,7 +771,14 @@ export default function App() {
             onOpenDay={(date) => void openDay(date)}
             onOpen={(appointment) => setVisit(appointment)}
             onExport={() => void exportWeek()}
-            onExportCalendar={exportCalendar}
+            onSyncGoogle={() => {
+              if (!isGoogleConnected()) {
+                setToast("Conectá Google Calendar en Mi perfil");
+                return;
+              }
+              void syncGoogle(true);
+            }}
+            googleConnected={googleConnected}
             onRefresh={() => setRefreshAsk(true)}
           />
         )}
@@ -973,7 +981,7 @@ export default function App() {
           googleConnected={googleConnected}
           syncing={syncing}
           onConnectGoogle={handleConnectGoogle}
-          onSyncGoogle={() => void syncGoogle()}
+          onSyncGoogle={() => void syncGoogle(true)}
           onClose={() => setProfileOpen(false)}
           onSaved={async () => {
             const updated = await getTechnician(technician.id);
@@ -1244,7 +1252,8 @@ function WeekView({
   onOpenDay,
   onOpen,
   onExport,
-  onExportCalendar,
+  onSyncGoogle,
+  googleConnected,
   onRefresh,
 }: {
   days: DaySummary[];
@@ -1253,7 +1262,8 @@ function WeekView({
   onOpenDay: (date: string) => void;
   onOpen: (appointment: Appointment) => void;
   onExport: () => void;
-  onExportCalendar: () => void;
+  onSyncGoogle: () => void;
+  googleConnected: boolean;
   onRefresh: () => void;
 }) {
   const [mode, setMode] = useState<"list" | "calendar">("list");
@@ -1406,10 +1416,10 @@ function WeekView({
       <div className="flex flex-wrap items-center justify-end gap-3">
         <button
           type="button"
-          onClick={onExportCalendar}
+          onClick={onSyncGoogle}
           className="text-[11px] font-semibold text-brand"
         >
-          Google Calendar (.ics)
+          {googleConnected ? "Sincronizar con Google" : "Conectar Google"}
         </button>
         <button
           type="button"
@@ -2894,6 +2904,9 @@ function AdminView({ onClose }: { onClose: () => void }) {
   const [business, setBusiness] = useState<"day" | "clients" | null>(null);
   const [businessRows, setBusinessRows] = useState<Appointment[]>([]);
   const [businessClients, setBusinessClients] = useState<TechnicianClient[]>([]);
+  const [uploadUrl, setUploadUrl] = useState("");
+  const [uploadToken, setUploadToken] = useState("");
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [adminPin, setAdminPinValue] = useState("");
   const [adminCurrent, setAdminCurrent] = useState("");
   const [adminNew, setAdminNew] = useState("");
@@ -2912,6 +2925,8 @@ function AdminView({ onClose }: { onClose: () => void }) {
     setTechnicians(list);
     setLocations(await listLocations(true));
     setAdminPinValue(await getAdminPin());
+    setUploadUrl((await getSetting("uploadUrl")) ?? "");
+    setUploadToken((await getSetting("uploadToken")) ?? "");
     const entries = await Promise.all(
       list.map(async (technician) => [technician.id, await countAppointments(technician.id)] as const)
     );
@@ -3153,6 +3168,43 @@ function AdminView({ onClose }: { onClose: () => void }) {
     await load();
   }
 
+  async function saveUploadSettings() {
+    await setSetting("uploadUrl", uploadUrl.trim());
+    await setSetting("uploadToken", uploadToken.trim());
+    setUploadStatus("Guardado");
+  }
+
+  async function uploadDay() {
+    const url = uploadUrl.trim();
+    if (!url) {
+      setError("Pegá la URL del Apps Script.");
+      return;
+    }
+    try {
+      const payload = await buildDaily(todayIso());
+      if (!payload.total) {
+        setError("Hoy no hay citas para subir.");
+        return;
+      }
+      const message = await uploadDaily(url, uploadToken.trim(), payload);
+      setError(null);
+      setUploadStatus(message);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudo subir.");
+    }
+  }
+
+  function askUpload() {
+    setConfirm({
+      title: "Subir cierre del día",
+      body: "Se envían las citas de hoy a tu Google Sheet. Si ya subiste hoy, no se duplican.",
+      confirmLabel: "Subir",
+      run: async () => {
+        await uploadDay();
+      },
+    });
+  }
+
   function changeAdminPin() {
     if (adminCurrent !== adminPin) {
       setAdminError("El PIN actual no coincide.");
@@ -3253,6 +3305,40 @@ function AdminView({ onClose }: { onClose: () => void }) {
               Clientes (todos)
             </button>
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-line bg-surface p-3">
+          <p className="text-xs font-semibold">Subir a Google</p>
+          <p className="text-[10px] text-muted">Cierre del día a tu hoja (Apps Script).</p>
+          <input
+            value={uploadUrl}
+            onChange={(event) => setUploadUrl(event.target.value)}
+            placeholder="URL del Apps Script (/exec)"
+            className="mt-2 w-full rounded-lg border border-line bg-canvas px-2 py-2 text-[11px] outline-none focus:border-brand"
+          />
+          <input
+            value={uploadToken}
+            onChange={(event) => setUploadToken(event.target.value)}
+            placeholder="Token"
+            className="mt-1 w-full rounded-lg border border-line bg-canvas px-2 py-2 text-[11px] outline-none focus:border-brand"
+          />
+          <div className="mt-2 grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => void saveUploadSettings()}
+              className="h-9 rounded-lg border border-line text-[11px] font-semibold text-muted"
+            >
+              Guardar
+            </button>
+            <button
+              type="button"
+              onClick={askUpload}
+              className="h-9 rounded-lg bg-brand-solid text-[11px] font-semibold text-white"
+            >
+              Subir cierre
+            </button>
+          </div>
+          {uploadStatus && <p className="mt-1 text-[10px] text-brand">{uploadStatus}</p>}
         </section>
 
         <section className="rounded-2xl border border-line bg-surface p-3">

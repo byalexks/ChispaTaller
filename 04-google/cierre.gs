@@ -1,0 +1,113 @@
+/**
+ * Chispa Taller — receptor del cierre diario.
+ *
+ * 1. Creá una hoja de cálculo nueva.
+ * 2. Extensiones → Apps Script.
+ * 3. Pegá este archivo completo.
+ * 4. Cambiá TOKEN por una clave larga cualquiera (la misma que pongas en la app).
+ * 5. Implementar → Nueva implementación → Aplicación web
+ *    - Ejecutar como: Yo
+ *    - Quién tiene acceso: Cualquier usuario
+ * 6. Copiá la URL que termina en /exec y pegala en la app:
+ *    Administración → Subir a Google.
+ *
+ * El script crea la hoja "Cierre" con encabezados la primera vez.
+ * Si subís el mismo día dos veces, no duplica: salta los IDs que ya están.
+ */
+
+const TOKEN = "CAMBIA_ESTE_TOKEN_POR_UNA_CLAVE_LARGA";
+const SHEET_NAME = "Cierre";
+
+const HEADERS = [
+  "ID",
+  "Fecha",
+  "Hora",
+  "Técnico",
+  "Local",
+  "Cliente",
+  "Teléfono",
+  "Vehículo",
+  "Tipo",
+  "Estado",
+  "Monto",
+  "Observaciones",
+  "Fotos",
+  "Subido",
+];
+
+function doPost(e) {
+  try {
+    const body = JSON.parse(e.postData.contents);
+
+    if (TOKEN && body.token !== TOKEN) {
+      return json({ ok: false, error: "Token inválido" });
+    }
+
+    const sheet = getSheet();
+    const existing = new Set(
+      sheet
+        .getRange(2, 1, Math.max(sheet.getLastRow() - 1, 0), 1)
+        .getValues()
+        .flat()
+        .map(String)
+    );
+
+    const rows = [];
+    for (const row of body.filas || []) {
+      if (existing.has(String(row.id))) continue;
+      rows.push([
+        row.id,
+        row.fecha,
+        row.hora,
+        row.tecnico,
+        row.local,
+        row.cliente,
+        row.telefono,
+        row.vehiculo,
+        row.tipo,
+        row.estado,
+        row.monto === null ? "" : row.monto,
+        row.observaciones,
+        row.fotos,
+        body.generadoEn,
+      ]);
+    }
+
+    if (rows.length) {
+      sheet
+        .getRange(sheet.getLastRow() + 1, 1, rows.length, HEADERS.length)
+        .setValues(rows);
+    }
+
+    return json({
+      ok: true,
+      mensaje: rows.length
+        ? `${rows.length} filas subidas`
+        : "Todo ya estaba subido",
+    });
+  } catch (error) {
+    return json({ ok: false, error: String(error) });
+  }
+}
+
+function doGet() {
+  return json({ ok: true, mensaje: "Chispa Taller listo" });
+}
+
+function getSheet() {
+  const book = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = book.getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    sheet = book.insertSheet(SHEET_NAME);
+    sheet.appendRow(HEADERS);
+    sheet.getRange(1, 1, 1, HEADERS.length).setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function json(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(
+    ContentService.MimeType.JSON
+  );
+}

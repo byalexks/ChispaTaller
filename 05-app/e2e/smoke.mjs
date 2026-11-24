@@ -178,15 +178,11 @@ try {
     await page.getByRole("button", { name: "Cerrar", exact: true }).click();
   });
 
-  await step("semana en vista calendario y .ics", async () => {
+  await step("semana en vista calendario y botón de Google", async () => {
     await page.getByRole("button", { name: "Calendario", exact: true }).click();
-    const [download] = await Promise.all([
-      page.waitForEvent("download"),
-      page.getByRole("button", { name: /Google Calendar/ }).click(),
-    ]);
-    if (!download.suggestedFilename().endsWith(".ics")) {
-      throw new Error(`No es .ics: ${download.suggestedFilename()}`);
-    }
+    await page
+      .getByRole("button", { name: /Conectar Google|Sincronizar con Google/ })
+      .waitFor();
     await page.getByRole("button", { name: "Lista", exact: true }).click();
   });
 
