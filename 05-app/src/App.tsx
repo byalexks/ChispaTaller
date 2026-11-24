@@ -57,7 +57,7 @@ import {
   type GoogleEvent,
 } from "./google";
 import { downloadCsv, downloadJson, downloadBlob, safeFileName } from "./export";
-import { buildDaily, uploadDaily } from "./daily";
+import { buildDaily, buildRange, uploadDaily } from "./daily";
 import { zipSync } from "fflate";
 import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
 import type {
@@ -3205,6 +3205,38 @@ function AdminView({ onClose }: { onClose: () => void }) {
     });
   }
 
+  async function uploadWeek() {
+    const url = uploadUrl.trim();
+    if (!url) {
+      setError("Pegá la URL del Apps Script.");
+      return;
+    }
+    try {
+      const today = todayIso();
+      const payload = await buildRange(isoWithOffset(today, -6), today);
+      if (!payload.total) {
+        setError("No hay citas en los últimos 7 días.");
+        return;
+      }
+      const message = await uploadDaily(url, uploadToken.trim(), payload);
+      setError(null);
+      setUploadStatus(message);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudo subir.");
+    }
+  }
+
+  function askUploadWeek() {
+    setConfirm({
+      title: "Subir últimos 7 días",
+      body: "Se envían las citas de la última semana. Las que ya están en la hoja se saltan, así que no hay duplicados.",
+      confirmLabel: "Subir 7 días",
+      run: async () => {
+        await uploadWeek();
+      },
+    });
+  }
+
   function changeAdminPin() {
     if (adminCurrent !== adminPin) {
       setAdminError("El PIN actual no coincide.");
@@ -3335,9 +3367,16 @@ function AdminView({ onClose }: { onClose: () => void }) {
               onClick={askUpload}
               className="h-9 rounded-lg bg-brand-solid text-[11px] font-semibold text-white"
             >
-              Subir cierre
+              Subir hoy
             </button>
           </div>
+          <button
+            type="button"
+            onClick={askUploadWeek}
+            className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand"
+          >
+            Subir últimos 7 días
+          </button>
           {uploadStatus && <p className="mt-1 text-[10px] text-brand">{uploadStatus}</p>}
         </section>
 

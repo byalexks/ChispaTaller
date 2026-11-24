@@ -1,5 +1,6 @@
 import {
   allAppointmentsForDay,
+  isoWithOffset,
   listLocations,
   listTechnicians,
   photosForAppointment,
@@ -68,11 +69,31 @@ export async function buildDaily(date: string): Promise<DailyPayload> {
   };
 }
 
+/** Several days in one payload, so a forgotten day gets uploaded later. */
+export async function buildRange(start: string, end: string): Promise<DailyPayload> {
+  const filas: DailyRow[] = [];
+  let date = start;
+  let guard = 0;
+
+  while (date <= end && guard < 31) {
+    const daily = await buildDaily(date);
+    filas.push(...daily.filas);
+    date = isoWithOffset(date, 1);
+    guard += 1;
+  }
+
+  return {
+    fecha: start === end ? start : `${start}..${end}`,
+    generadoEn: new Date().toISOString(),
+    total: filas.length,
+    filas,
+  };
+}
+
 /**
  * Sends the day to a Google Apps Script web app.
  * Uses text/plain so the browser does not need a CORS preflight.
- */
-export async function uploadDaily(
+ */export async function uploadDaily(
   url: string,
   token: string,
   payload: DailyPayload
