@@ -90,8 +90,14 @@ function doPost(e) {
   }
 }
 
-function doGet() {
-  return json({ ok: true, mensaje: "Chispa Taller listo" });
+function doGet(e) {
+  const provided = e && e.parameter ? e.parameter.token : null;
+  return json({
+    ok: true,
+    mensaje: "Chispa Taller listo",
+    tokenConfigurado: Boolean(TOKEN),
+    tokenOk: provided ? provided === TOKEN : null,
+  });
 }
 
 function getSheet() {

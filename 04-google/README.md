@@ -46,3 +46,15 @@ Abrí la URL `/exec` en el navegador: debe devolver
 ```json
 { "ok": true, "mensaje": "Chispa Taller listo" }
 ```
+
+Para saber si el token coincide, agregá `?token=TU_TOKEN`:
+
+```
+https://script.google.com/macros/s/.../exec?token=chispa-taller-2026-9f3k2m8x
+```
+
+- `"tokenOk": true` → el script publicado tiene ese token; si la app falla, el
+  token del formulario está mal escrito.
+- `"tokenOk": false` → el script publicado tiene **otro** token (casi siempre
+  porque no creaste una **versión nueva** después de editarlo).
+- `"tokenOk": null` → no pasaste `?token=`.
