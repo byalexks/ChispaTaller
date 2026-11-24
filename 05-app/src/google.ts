@@ -1,143 +1,78 @@
 /**
- * Google Calendar sync (minimal, no backend).
+ * Google Calendar sync through the same Apps Script as the daily close.
  *
- * Uses Google Identity Services (GIS) to get an access token in the browser and
- * the Calendar API to insert/patch/delete events. The token lasts ~1 hour and
- * is renewed silently while the app is open.
+ * No OAuth and no Google verification: the script creates, updates and deletes
+ * the events with the Google account that owns the Sheet. The token protects
+ * the endpoint.
  */
-
-const SCOPE = "https://www.googleapis.com/auth/calendar.events";
-const GIS_SRC = "https://accounts.google.com/gsi/client";
-
-/** Public OAuth client id for Chispa Taller. Not a secret. */
-export const DEFAULT_CLIENT_ID =
-  "344688969462-4hi6f3pfcfnbbf1eh6qr32pr3pcr499u.apps.googleusercontent.com";
-
-type Token = { value: string; expiresAt: number };
-
-let token: Token | null = null;
-let tokenClient: {
-  requestAccessToken: (options?: { prompt?: string }) => void;
-} | null = null;
-let gisLoading: Promise<void> | null = null;
-
-function loadGis(): Promise<void> {
-  if (gisLoading) return gisLoading;
-  gisLoading = new Promise((resolve, reject) => {
-    if ((window as unknown as { google?: unknown }).google) {
-      resolve();
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = GIS_SRC;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("No se pudo cargar Google Identity Services"));
-    document.head.appendChild(script);
-  });
-  return gisLoading;
-}
-
-export function isConnected(): boolean {
-  return Boolean(token && token.expiresAt > Date.now() + 60_000);
-}
-
-export async function connect(clientId: string): Promise<void> {
-  if (!clientId.trim()) throw new Error("Falta el Client ID de Google.");
-  await loadGis();
-
-  const google = (window as unknown as {
-    google?: {
-      accounts?: {
-        oauth2?: {
-          initTokenClient: (config: {
-            client_id: string;
-            scope: string;
-            callback: (response: {
-              access_token?: string;
-              expires_in?: number;
-              error?: string;
-            }) => void;
-          }) => { requestAccessToken: (options?: { prompt?: string }) => void };
-        };
-      };
-    };
-  }).google;
-
-  const oauth2 = google?.accounts?.oauth2;
-  if (!oauth2) throw new Error("Google no está disponible en este navegador.");
-
-  await new Promise<void>((resolve, reject) => {
-    tokenClient = oauth2.initTokenClient({
-      client_id: clientId.trim(),
-      scope: SCOPE,
-      callback: (response) => {
-        if (response.error || !response.access_token) {
-          reject(new Error(response.error ?? "Sin token de Google"));
-          return;
-        }
-        token = {
-          value: response.access_token,
-          expiresAt: Date.now() + (response.expires_in ?? 3600) * 1000,
-        };
-        resolve();
-      },
-    });
-    tokenClient?.requestAccessToken({ prompt: "consent" });
-  });
-}
-
-async function api(path: string, init: RequestInit = {}) {
-  if (!token) throw new Error("No conectado a Google.");
-
-  const response = await fetch(`https://www.googleapis.com/calendar/v3${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token.value}`,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Google ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  }
-  if (response.status === 204) return null;
-  return response.json();
-}
 
 export interface GoogleEvent {
   summary: string;
   location?: string;
   description?: string;
-  start: { dateTime: string; timeZone: string };
-  end: { dateTime: string; timeZone: string };
+  /** ISO with Colombia's offset, e.g. 2026-11-24T08:00:00-05:00 */
+  start: string;
+  end: string;
 }
 
-export async function insertEvent(event: GoogleEvent): Promise<string> {
-  const created = (await api("/calendars/primary/events", {
+type CalendarResponse = {
+  ok?: boolean;
+  error?: string;
+  eventId?: string;
+};
+
+async function call(
+  url: string,
+  token: string,
+  payload: Record<string, unknown>
+): Promise<CalendarResponse> {
+  const response = await fetch(url, {
     method: "POST",
-    body: JSON.stringify(event),
-  })) as { id?: string };
-  if (!created?.id) throw new Error("Google no devolvió el evento.");
-  return created.id;
-}
-
-export async function patchEvent(eventId: string, event: GoogleEvent): Promise<void> {
-  await api(`/calendars/primary/events/${encodeURIComponent(eventId)}`, {
-    method: "PATCH",
-    body: JSON.stringify(event),
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ token, ...payload }),
   });
+
+  const text = await response.text();
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  let data: CalendarResponse | null = null;
+  try {
+    data = JSON.parse(text) as CalendarResponse;
+  } catch {
+    throw new Error(
+      "La URL no devolvió JSON. ¿Publicaste el Apps Script como aplicación web?"
+    );
+  }
+
+  if (data?.ok === false) throw new Error(data.error ?? "El script rechazó el evento");
+  return data ?? {};
 }
 
-export async function deleteEvent(eventId: string): Promise<void> {
-  try {
-    await api(`/calendars/primary/events/${encodeURIComponent(eventId)}`, {
-      method: "DELETE",
-    });
-  } catch (error) {
-    // Already deleted in Google: nothing to do.
-    if (!String(error).includes("410")) throw error;
-  }
+export async function insertEvent(
+  url: string,
+  token: string,
+  event: GoogleEvent
+): Promise<string> {
+  const data = await call(url, token, { action: "calendar-create", ...event });
+  if (!data.eventId) throw new Error("Google no devolvió el evento");
+  return data.eventId;
+}
+
+/** Updates the event. If it was deleted in Google, the script creates a new one. */
+export async function patchEvent(
+  url: string,
+  token: string,
+  eventId: string,
+  event: GoogleEvent
+): Promise<string> {
+  const data = await call(url, token, { action: "calendar-update", eventId, ...event });
+  return data.eventId ?? eventId;
+}
+
+export async function deleteEvent(
+  url: string,
+  token: string,
+  eventId: string
+): Promise<void> {
+  await call(url, token, { action: "calendar-delete", eventId });
 }

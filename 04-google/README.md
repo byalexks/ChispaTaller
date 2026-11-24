@@ -38,7 +38,24 @@ en cada subida:
 - La fila 1 queda en negrita y congelada.
 
 No hace falta limpiar la hoja de una forma especial: podés borrar las filas y la
-próxima subida la deja lista otra vez. `VERSION` ahora es **4**.
+próxima subida la deja lista otra vez. `VERSION` ahora es **5**.
+
+## Google Calendar (sin OAuth)
+
+El calendario usa el **mismo Apps Script**, no OAuth. El script crea, actualiza y
+borra los eventos en el **calendario principal de la cuenta dueña del script**
+(la misma del Sheet). Por eso ya no hace falta verificar `github.io` ni agregar
+orígenes en Google Cloud.
+
+- No funciona en el calendario personal de cada técnico: todos los eventos caen
+  en el calendario del administrador. Es el precio de no tener OAuth.
+- La primera vez, Apps Script pide autorización para **Calendar**. Aceptala.
+- En la app: **Mi perfil → Google Calendar → Sincronizar ahora**. También se
+  sincroniza solo al guardar o cambiar una cita.
+
+El script no crea eventos duplicados: guarda el `eventId` de Google en cada cita.
+Si un evento se borra a mano en Google, la próxima sincronización lo vuelve a
+crear.
 
 ## Configuración compartida (técnicos, PINs y PIN admin)
 

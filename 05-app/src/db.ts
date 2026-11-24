@@ -815,9 +815,38 @@ const DEMO: DemoEntry[] = [
   { day: 5, time: "14:00", name: "Marta Ospina", model: "stareer 3", phone: "3124445566", type: "revision", status: "scheduled", description: "Ruido en la dirección." },
 ];
 
+export const DEMO_COUNT = DEMO.length;
+
 /** Creates believable demo appointments for one technician, to test the UI. */
 export async function seedDemoData(technicianId: string): Promise<number> {
+  const db = await getDb();
   const base = todayIso();
+
+  // Replace the previous demo set instead of stacking a second copy.
+  const existing = await db.getAllFromIndex("appointments", "byTechnician", technicianId);
+  const demos = existing.filter((appointment) =>
+    (appointment.originalText ?? "").startsWith("Datos de prueba")
+  );
+
+  if (demos.length) {
+    const ids = new Set(demos.map((appointment) => appointment.id));
+    const messages = await db.getAll("messages");
+    const tx = db.transaction(["appointments", "messages", "photos"], "readwrite");
+    for (const appointment of demos) {
+      await tx.objectStore("appointments").delete(appointment.id);
+      const photoIds =
+        appointment.photoIds ?? (appointment.photoId ? [appointment.photoId] : []);
+      for (const photoId of photoIds) {
+        await tx.objectStore("photos").delete(photoId);
+      }
+    }
+    for (const message of messages) {
+      if (message.appointmentId && ids.has(message.appointmentId)) {
+        await tx.objectStore("messages").delete(message.id);
+      }
+    }
+    await tx.done;
+  }
 
   const drafts = DEMO.map((entry) => {
     const date = isoWithOffset(base, entry.day);

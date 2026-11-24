@@ -34,13 +34,28 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
 
 // Keep tests hermetic: never pull the real shared config from Google.
-await page.route("https://script.google.com/**", (route) =>
-  route.fulfill({
+await page.route("https://script.google.com/**", async (route) => {
+  let body = {};
+  try {
+    body = route.request().postDataJSON() ?? {};
+  } catch {
+    body = {};
+  }
+
+  if (typeof body.action === "string" && body.action.startsWith("calendar-")) {
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, eventId: body.eventId ?? `e2e-${Date.now()}` }),
+    });
+  }
+
+  return route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ ok: true, cipher: "" }),
-  })
-);
+  });
+});
 
 const problems = [];
 page.on("console", (message) => {
@@ -88,6 +103,13 @@ try {
     await page.getByRole("button", { name: "Crear", exact: true }).click();
     await pause(900);
     await page.getByText(/citas/).first().waitFor();
+  });
+
+  await step("crear datos dos veces no duplica", async () => {
+    await page.getByRole("button", { name: "Crear datos" }).first().click();
+    await page.getByRole("button", { name: "Crear", exact: true }).click();
+    await pause(900);
+    await page.getByText(/citas de prueba creadas/).first().waitFor();
   });
 
   await step("volver al login", async () => {
@@ -217,6 +239,9 @@ try {
       throw new Error("El JSON no tiene la forma esperada");
     }
     console.log(`  JSON: ${data.totalCitas} citas en ${data.dias.length} días`);
+    if (data.totalCitas !== 21) {
+      throw new Error(`Se esperaban 21 citas (20 demo + 1 manual), llegaron ${data.totalCitas}`);
+    }
   });
 
   await step("clientes: buscar y abrir historial", async () => {

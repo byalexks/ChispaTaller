@@ -7,7 +7,7 @@
 
 const TOKEN = "chispa-2026-abc123";
 const SHEET_NAME = "Cierre";
-const VERSION = "4";
+const VERSION = "5";
 
 const HEADERS = [
   "ID",
@@ -46,6 +46,10 @@ function doPost(e) {
 
     if (TOKEN && body.token !== TOKEN) {
       return json({ ok: false, error: "Token inválido" });
+    }
+
+    if (body.action && body.action.indexOf("calendar-") === 0) {
+      return handleCalendar(body);
     }
 
     const sheet = getSheet();
@@ -122,6 +126,69 @@ function doGet(e) {
     tokenConfigurado: Boolean(TOKEN),
     tokenOk: provided ? provided === TOKEN : null,
   });
+}
+
+/**
+ * Calendar events in the script owner's calendar.
+ *
+ * The app no longer needs OAuth: the script creates, updates and deletes the
+ * events with the same Google account that owns the Sheet.
+ */
+function handleCalendar(body) {
+  try {
+    const calendar = CalendarApp.getDefaultCalendar();
+    const start = new Date(body.start);
+    const end = new Date(body.end);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return json({ ok: false, error: "Fecha u hora inválida" });
+    }
+
+    if (body.action === "calendar-create") {
+      const event = calendar.createEvent(
+        body.summary || "Cita",
+        start,
+        end,
+        {
+          description: body.description || "",
+          location: body.location || "",
+        }
+      );
+      return json({ ok: true, eventId: event.getId() });
+    }
+
+    if (body.action === "calendar-update") {
+      const event = body.eventId ? CalendarApp.getEventById(body.eventId) : null;
+      if (!event) {
+        // The event was deleted in Google: create a fresh one.
+        const created = calendar.createEvent(
+          body.summary || "Cita",
+          start,
+          end,
+          {
+            description: body.description || "",
+            location: body.location || "",
+          }
+        );
+        return json({ ok: true, eventId: created.getId() });
+      }
+      event.setTitle(body.summary || "Cita");
+      event.setTime(start, end);
+      event.setDescription(body.description || "");
+      event.setLocation(body.location || "");
+      return json({ ok: true, eventId: event.getId() });
+    }
+
+    if (body.action === "calendar-delete") {
+      const event = body.eventId ? CalendarApp.getEventById(body.eventId) : null;
+      if (event) event.deleteEvent();
+      return json({ ok: true });
+    }
+
+    return json({ ok: false, error: "Acción de calendario desconocida" });
+  } catch (error) {
+    return json({ ok: false, error: String(error) });
+  }
 }
 
 function getSheet() {
