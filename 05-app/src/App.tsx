@@ -50,6 +50,7 @@ import {
   windowOf,
 } from "./db";
 import { compressPhoto } from "./images";
+import { dataAlerts } from "./alerts";
 import { exportBackup, importBackup } from "./backup";
 import {
   connect as connectGoogle,
@@ -843,39 +844,15 @@ export default function App() {
             ? await nextFreeSlot(appointment.date, appointment.type, technician.id)
             : null;
 
-        const extraAlerts: Alert[] = [];
-
-        if (!appointment.phone && appointment.name) {
-          const storedPhones = await clientPhonesForName(appointment.name);
-          if (storedPhones.length === 0) {
-            extraAlerts.push({
-              code: "MISSING_PHONE",
-              field: "phone",
-              severity: "medium",
-              message:
-                "Cliente sin teléfono registrado: no se podrá llamar ni confirmar por WhatsApp. Pedile al administrador que lo agregue.",
-            });
-          }
-        }
-
-        if (unknownLocation) {
-          extraAlerts.push({
-            code: "UNKNOWN_LOCATION",
-            field: "location",
-            severity: "medium",
-            message: `El local "${unknownLocation}" no está registrado. La cita se guarda sin local: pedile al administrador que lo cree en Administración → Locales.`,
-          });
-        }
-
-        if (!appointment.model) {
-          extraAlerts.push({
-            code: "MISSING_VEHICLE",
-            field: "model",
-            severity: "low",
-            message:
-              "Sin vehículo o modelo: completalo para que el historial del cliente quede claro.",
-          });
-        }
+        const storedPhones =
+          !appointment.phone && appointment.name
+            ? await clientPhonesForName(appointment.name)
+            : [];
+        const extraAlerts: Alert[] = dataAlerts({
+          hasPhone: Boolean(appointment.phone) || storedPhones.length > 0,
+          hasModel: Boolean(appointment.model),
+          unknownLocation,
+        });
 
         return {
           ...appointment,
@@ -1556,14 +1533,16 @@ function InboxView({
   return (
     <div className="space-y-3">
       <p className="rounded-xl bg-canvas px-3 py-2 text-[11px] text-muted">
-        Acá llegan los mensajes que la app <b>no pudo convertir en cita</b>. Tocá
-        «Clasificar», completá los datos y se agenda.
+        Acá llegan solo los mensajes que la app <b>no pudo convertir en cita</b> (falta
+        el nombre o la fecha). Si lo que falta es el teléfono, el local o el vehículo,
+        la cita <b>se guarda igual</b> con un aviso dentro de la cita y en el cierre del
+        día. Tocá «Clasificar», completá los datos y se agenda.
       </p>
 
       {messages.length === 0 ? (
         <EmptyState
           title="No hay mensajes pendientes"
-          body="Todo lo que pegaste se entendió. Si algo no se entiende, aparece acá."
+          body="Todo lo que pegaste se convirtió en cita. Los datos incompletos quedaron como avisos dentro de cada cita."
           action="Pegar mensaje"
           onAction={onAdd}
           kind="message"

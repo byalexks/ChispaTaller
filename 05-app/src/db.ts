@@ -18,6 +18,7 @@ import type {
   VisitPhoto,
   WindowKey,
 } from "./types";
+import { dataAlerts } from "./alerts";
 
 const DB_NAME = "agenda-servicio-tecnico";
 const DB_VERSION = 7;
@@ -774,13 +775,15 @@ type DemoEntry = {
   day: number;
   time: string;
   name: string;
-  model: string;
-  phone: string;
+  model?: string;
+  phone?: string;
   type: ServiceType;
   status: AppointmentStatus;
   part?: string;
   description?: string;
   amount?: number;
+  /** Local written in the message that does not exist in the catalog yet. */
+  location?: string;
 };
 
 /** Believable week: all states, no time clashes, and one day filled to capacity. */
@@ -789,6 +792,8 @@ const DEMO: DemoEntry[] = [
   { day: 0, time: "09:00", name: "Hilda de Ávila", model: "galaxy 3", phone: "3006532525", type: "maintenance", status: "scheduled" },
   { day: 0, time: "10:00", name: "Luis Cárdenas", model: "Ledo 3", phone: "3158889900", type: "maintenance", status: "scheduled" },
   { day: 0, time: "13:00", name: "Karol Giraldo", model: "stareer 3", phone: "3015558899", type: "revision", status: "to_confirm", description: "No carga desde hace una semana." },
+  { day: 0, time: "14:00", name: "Cliente Local Nuevo", type: "maintenance", status: "scheduled", location: "Bocagrande", description: "Ejemplo: el mensaje trae un local que no existe." },
+  { day: 0, time: "15:00", name: "Cliente Sin Teléfono", model: "galaxy 3", type: "revision", status: "to_confirm", description: "Ejemplo: el cliente no dejó teléfono." },
 
   { day: 1, time: "08:00", name: "Ana Beltrán", model: "galaxy 3", phone: "3182223344", type: "maintenance", status: "attended" },
   { day: 1, time: "09:00", name: "Pedro Salas", model: "stareer 3", phone: "3009998877", type: "maintenance", status: "scheduled" },
@@ -822,14 +827,14 @@ export async function seedDemoData(technicianId: string): Promise<number> {
       secondaryType: entry.part ? "part" : null,
       status: entry.status,
       name: entry.name,
-      model: entry.model,
+      model: entry.model ?? null,
       date,
       weekday: weekdayOf(date),
       time: entry.time,
       endTime: `${String(hour + 1).padStart(2, "0")}:00`,
       isWindow: true,
-      phone: entry.phone,
-      location: null,
+      phone: entry.phone ?? null,
+      location: entry.location ?? null,
       address: null,
       part: entry.part ?? null,
       description: entry.description ?? null,
@@ -841,6 +846,11 @@ export async function seedDemoData(technicianId: string): Promise<number> {
       extras: {},
       originalText: `Datos de prueba · ${entry.name}`,
       receivedAt: new Date().toISOString(),
+      alerts: dataAlerts({
+        hasPhone: Boolean(entry.phone),
+        hasModel: Boolean(entry.model),
+        unknownLocation: entry.location ?? null,
+      }),
     };
     return draft;
   });
