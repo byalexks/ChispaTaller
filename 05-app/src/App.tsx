@@ -219,6 +219,12 @@ export default function App() {
   const [autoUploading, setAutoUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [toastKind, setToastKind] = useState<"ok" | "error">("ok");
+
+  function showToast(message: string, kind: "ok" | "error" = "ok") {
+    setToastKind(kind);
+    setToast(message);
+  }
   const [theme, setTheme] = useState<"light" | "dim">(() => {
     const saved = localStorage.getItem("theme");
     if (saved === "light" || saved === "dim") return saved;
@@ -333,7 +339,7 @@ export default function App() {
       await setSetting("lastAutoUploadDate", target);
       if (!quiet) setToast(message);
     } catch (error) {
-      if (!quiet) setToast(error instanceof Error ? error.message : "No se pudo subir");
+      if (!quiet) showToast(error instanceof Error ? error.message : "No se pudo subir", "error");
     } finally {
       setAutoUploading(false);
     }
@@ -359,9 +365,9 @@ export default function App() {
 
       const message = await uploadDaily(uploadUrl.trim(), uploadToken.trim(), payload);
       await setSetting("lastAutoUploadDate", today);
-      setToast(message);
+      showToast(message);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "No se pudo subir");
+      showToast(error instanceof Error ? error.message : "No se pudo subir", "error");
     } finally {
       setAutoUploading(false);
     }
@@ -541,7 +547,7 @@ export default function App() {
         } con Google`
       );
     } catch (error) {
-      setToast(error instanceof Error ? error.message.slice(0, 70) : "No se pudo sincronizar");
+      showToast(error instanceof Error ? error.message.slice(0, 70) : "No se pudo sincronizar", "error");
     } finally {
       setSyncing(false);
     }
@@ -554,7 +560,7 @@ export default function App() {
       await syncGoogle(true);
       setToast("Google Calendar conectado");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "No se pudo conectar con Google");
+      showToast(error instanceof Error ? error.message : "No se pudo conectar con Google", "error");
     }
   }
 
@@ -786,7 +792,7 @@ export default function App() {
             void listTechnicians().then(setTechnicians);
           }}
         />
-        <Toast message={toast} />
+        <Toast message={toast} kind={toastKind} />
       </>
     );
   }
@@ -1099,7 +1105,7 @@ export default function App() {
         />
       )}
 
-      <Toast message={toast} />
+      <Toast message={toast} kind={toastKind} />
     </div>
   );
 }
@@ -1123,23 +1129,40 @@ function Spinner({ className = "h-4 w-4" }: { className?: string }) {
   );
 }
 
-function Toast({ message }: { message: string | null }) {
+function Toast({ message, kind = "ok" }: { message: string | null; kind?: "ok" | "error" }) {
   if (!message) return null;
 
   return (
     <div className="fixed left-1/2 top-24 z-40 flex animate-toast -translate-x-1/2 items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white shadow-lg">
-      <svg
-        viewBox="0 0 24 24"
-        className="h-3.5 w-3.5 text-green-400"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M20 6 9 17l-5-5" />
-      </svg>
+      {kind === "ok" ? (
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3.5 w-3.5 text-green-400"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      ) : (
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3.5 w-3.5 text-red-400"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 8v5" />
+          <path d="M12 17h.01" />
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+      )}
       {message}
     </div>
   );
