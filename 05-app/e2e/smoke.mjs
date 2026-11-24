@@ -9,7 +9,7 @@
  */
 
 import { chromium } from "playwright";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:5173";
@@ -141,12 +141,12 @@ try {
     if (!Array.isArray(data.dias) || typeof data.totalCitas !== "number") {
       throw new Error("El JSON no tiene la forma esperada");
     }
-    writeFileSync(join(SHOTS, "export.json"), JSON.stringify(data, null, 2));
     console.log(`  JSON: ${data.totalCitas} citas en ${data.dias.length} días`);
   });
 
   await step("clientes: buscar y abrir historial", async () => {
     await page.getByRole("button", { name: "Clientes", exact: true }).click();
+    await page.getByPlaceholder("Buscar por nombre o teléfono").waitFor();
     await page.getByPlaceholder("Buscar por nombre o teléfono").fill("hilda");
     await page.getByText("Hilda de Ávila", { exact: true }).first().click();
     await page.getByText(/visita/).first().waitFor();
@@ -196,6 +196,43 @@ CANCELADO`;
     await page.getByText("Cancelada", { exact: true }).first().waitFor();
     await page.getByRole("button", { name: "Cerrar", exact: true }).click();
     await page.getByText("Sin cita próxima", { exact: true }).first().waitFor();
+  });
+
+  await step("reprogramar una cita desde un mensaje", async () => {
+    await page.getByRole("button", { name: "Hoy", exact: true }).click();
+    await page.getByRole("button", { name: "Agregar" }).click();
+    await page.getByText("Pegar mensaje de WhatsApp", { exact: false }).click();
+
+    const target = new Date();
+    target.setDate(target.getDate() + 6);
+    const readable = target.toLocaleDateString("es-CO", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+
+    const text = `REPROGRAMACION DE CITA
+
+Nombre: Marta Ospina
+Vehículo: stareer 3
+Fecha y hora: ${readable} 2:00 pm
+Problema: se reprograma porque la clienta viaja.`;
+
+    await page.locator("textarea").first().fill(text);
+    await page.getByRole("button", { name: "Procesar" }).click();
+    await page.getByText(/Revisión/).first().waitFor();
+    await page.getByRole("button", { name: "Reprogramar", exact: true }).click();
+    await page.getByRole("button", { name: "Confirmar", exact: true }).click();
+    await pause(900);
+    await page.getByText("Jornada mañana", { exact: false }).first().waitFor();
+  });
+
+  await step("historial muestra la cita reprogramada", async () => {
+    await page.getByRole("button", { name: "Clientes", exact: true }).click();
+    await page.getByPlaceholder("Buscar por nombre o teléfono").fill("marta");
+    await page.getByText("Marta Ospina", { exact: true }).first().click();
+    await page.getByText("Reprogramada", { exact: true }).first().waitFor();
+    await page.getByRole("button", { name: "Cerrar", exact: true }).click();
   });
 
   await step("cambiar a modo oscuro", async () => {

@@ -22,8 +22,14 @@ import type {
 const DB_NAME = "agenda-servicio-tecnico";
 const DB_VERSION = 6;
 
-/** Statuses that consume a slot. */
-export const OCCUPYING = new Set(["scheduled", "to_confirm", "confirmed", "attended"]);
+/** Statuses that consume a slot. A rescheduled visit still happens on its new date. */
+export const OCCUPYING = new Set([
+  "scheduled",
+  "to_confirm",
+  "confirmed",
+  "attended",
+  "rescheduled",
+]);
 
 interface AgendaSchema extends DBSchema {
   technicians: { key: string; value: Technician };
@@ -462,7 +468,7 @@ export async function findMatch(
 ): Promise<Appointment | null> {
   const db = await getDb();
   const appointments = (await db.getAllFromIndex("appointments", "byTechnician", technicianId))
-    .filter((item) => item.status !== "cancelled" && item.status !== "rescheduled");
+    .filter((item) => item.status !== "cancelled");
   if (!appointments.length) return null;
 
   const wanted = draft.name ? nameTokens(draft.name) : [];
@@ -504,6 +510,21 @@ async function applyDraftToAppointment(
 
   if (mode === "cancel") {
     await db.put("appointments", { ...current, status: "cancelled", updatedAt: now });
+    return;
+  }
+
+  if (mode === "reschedule") {
+    await db.put("appointments", {
+      ...current,
+      date: draft.date ?? current.date,
+      weekday: draft.weekday ?? current.weekday,
+      time: draft.time ?? current.time,
+      endTime: draft.endTime ?? current.endTime,
+      status: "rescheduled",
+      previousDate: current.date ?? null,
+      alerts: draft.alerts ?? [],
+      updatedAt: now,
+    });
     return;
   }
 
@@ -598,7 +619,12 @@ export async function saveDrafts(
     const messageId = await nextId(db, "messages", "M");
     const receivedAt = draft.receivedAt ?? new Date().toISOString();
 
-    if ((draft.mode === "update" || draft.mode === "cancel") && draft.matchId) {
+    if (
+      (draft.mode === "update" ||
+        draft.mode === "cancel" ||
+        draft.mode === "reschedule") &&
+      draft.matchId
+    ) {
       await applyDraftToAppointment(draft.matchId, draft, draft.mode);
       await db.put("messages", {
         id: messageId,

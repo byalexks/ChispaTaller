@@ -381,9 +381,11 @@ export default function App() {
           : null;
         const match = await findMatch(appointment, technician.id);
         const mode: DraftMode = match
-          ? appointment.status === "cancelled"
+          ? appointment.intent === "cancel"
             ? "cancel"
-            : "update"
+            : appointment.intent === "reschedule"
+              ? "reschedule"
+              : "update"
           : "create";
         return {
           ...appointment,
@@ -1091,9 +1093,10 @@ function DraftCard({
 
   const modeOptions: { key: DraftMode; label: string }[] = [
     { key: "update", label: "Actualizar" },
+    { key: "reschedule", label: "Reprogramar" },
     { key: "create", label: "Crear nueva" },
   ];
-  if (draft.status === "cancelled") {
+  if (draft.intent === "cancel") {
     modeOptions.push({ key: "cancel", label: "Cancelar cita" });
   }
 
@@ -1134,13 +1137,13 @@ function DraftCard({
       {draft.matchId && (
         <div className="mt-2 rounded-lg border border-line bg-surface p-2">
           <p className="text-[10px] text-muted">Coincide con {draft.matchLabel}</p>
-          <div className="mt-1 flex gap-1">
+          <div className="mt-1 flex flex-wrap gap-1">
             {modeOptions.map((option) => (
               <button
                 key={option.key}
                 type="button"
                 onClick={() => onMode(option.key)}
-                className={`flex-1 rounded-md px-2 py-1 text-[10px] font-semibold ${
+                className={`flex-1 whitespace-nowrap rounded-md px-2 py-1 text-[10px] font-semibold ${
                   draft.mode === option.key ? "bg-brand-solid text-white" : "bg-canvas text-muted"
                 }`}
               >
@@ -1193,6 +1196,7 @@ function BottomNav({
             key={item.key}
             type="button"
             onClick={() => onChange(item.key)}
+            aria-current={view === item.key ? "page" : undefined}
             className={`relative py-3 text-xs font-semibold ${
               view === item.key ? "text-brand" : "text-muted"
             }`}
@@ -1467,6 +1471,7 @@ function Login({
             type="password"
             disabled={remaining > 0}
             placeholder="••••"
+            aria-label="PIN"
             className={`mx-auto block w-40 rounded-xl border bg-surface px-4 py-3 text-center text-2xl tracking-[0.4em] outline-none ${
               error ? "border-danger" : "border-line focus:border-brand"
             }`}
@@ -1545,6 +1550,7 @@ function Login({
             type="password"
             disabled={remaining > 0}
             placeholder="••••"
+            aria-label="PIN"
             className={`mx-auto mt-4 block w-40 rounded-xl border bg-surface px-4 py-3 text-center text-2xl tracking-[0.4em] outline-none ${
               error ? "border-danger" : "border-line focus:border-brand"
             }`}
@@ -1653,6 +1659,7 @@ function VisitSheet({
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [newDate, setNewDate] = useState(appointment.date ?? todayIso());
+  const [zoomed, setZoomed] = useState(false);
 
   useEffect(() => {
     let url: string | null = null;
@@ -1745,23 +1752,36 @@ function VisitSheet({
           );
         })()}
 
-        <label className="flex h-32 w-full cursor-pointer items-center justify-center overflow-hidden rounded-2xl border border-dashed border-line bg-surface text-center">
-          {photoUrl ? (
-            <img src={photoUrl} alt="Evidencia de la visita" className="h-full w-full object-cover" />
-          ) : (
+        {photoUrl ? (
+          <button
+            type="button"
+            onClick={() => setZoomed(true)}
+            className="relative h-32 w-full overflow-hidden rounded-2xl border border-line bg-surface"
+          >
+            <img
+              src={photoUrl}
+              alt="Evidencia de la visita"
+              className="h-full w-full object-cover"
+            />
+            <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-semibold text-white">
+              Ver foto
+            </span>
+          </button>
+        ) : (
+          <label className="flex h-32 w-full cursor-pointer items-center justify-center overflow-hidden rounded-2xl border border-dashed border-line bg-surface text-center">
             <span className="text-sm text-muted">
               <span className="mb-1 block text-2xl">📷</span>
               Tomar foto del vehículo
             </span>
-          )}
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          />
-        </label>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            />
+          </label>
+        )}
 
         <div>
           <p className="mb-1 text-xs font-semibold text-muted">¿Cómo salió?</p>
@@ -1869,6 +1889,26 @@ function VisitSheet({
       >
         {saving ? "Guardando…" : "Confirmar visita"}
       </button>
+
+      {zoomed && photoUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
+          onClick={() => setZoomed(false)}
+        >
+          <img
+            src={photoUrl}
+            alt="Evidencia de la visita"
+            className="max-h-full max-w-full rounded-xl object-contain"
+          />
+          <button
+            type="button"
+            onClick={() => setZoomed(false)}
+            className="absolute right-4 top-4 rounded-full bg-white/15 px-3 py-2 text-xs font-semibold text-white"
+          >
+            Cerrar
+          </button>
+        </div>
+      )}
     </Sheet>
   );
 }
@@ -2847,6 +2887,7 @@ function ClientsView({
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Buscar por nombre o teléfono"
+        aria-label="Buscar cliente"
         className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm outline-none focus:border-brand"
       />
 

@@ -47,6 +47,7 @@ export interface Draft {
   extras: Record<string, string>;
   originalText: string;
   receivedAt: string;
+  intent?: DraftIntent;
   alerts?: Alert[];
 }
 
@@ -65,7 +66,9 @@ export interface ReviewDraft extends Draft {
   matchLabel: string | null;
 }
 
-export type DraftMode = "create" | "update" | "cancel";
+export type DraftMode = "create" | "update" | "reschedule" | "cancel";
+
+export type DraftIntent = "create" | "reschedule" | "cancel";
 
 export interface Appointment extends Draft {
   id: string;
@@ -77,6 +80,7 @@ export interface Appointment extends Draft {
   notes: string | null;
   closedAt: string | null;
   photoId: string | null;
+  previousDate?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -9,7 +9,8 @@
     "preview": "vite preview --port 4173",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/",
-    "test:e2e": "node e2e/smoke.mjs"
+    "test:e2e": "node e2e/smoke.mjs",
+    "test:offline": "node e2e/offline.mjs"
   },
   "dependencies": {
     "idb": "^8.0.4",

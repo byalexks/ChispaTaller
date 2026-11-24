@@ -134,6 +134,19 @@ export function classify(text) {
   return { primary, secondary };
 }
 
+export function detectIntent(text) {
+  const value = normalize(text);
+  if (/cancelad/.test(value)) return "cancel";
+  if (
+    /(reprogram|reagend|cambio de fecha|cambiar la fecha|cambiar para|mover la cita|mover para|pasar la cita|pasar para|nueva fecha)/.test(
+      value
+    )
+  ) {
+    return "reschedule";
+  }
+  return "create";
+}
+
 function extractPhone(text, labelValue) {
   for (const candidate of [labelValue, text]) {
     if (!candidate) continue;
@@ -177,9 +190,9 @@ export function parseMessage(text, options = {}) {
   const { labels, leftovers } = segment(original);
   const { fields, extras } = mapFields(labels);
 
-  const normalized = normalize(original);
   const { primary: type, secondary } = classify(original);
-  const status = /cancelad/.test(normalized) ? "cancelled" : "scheduled";
+  const intent = detectIntent(original);
+  const status = intent === "cancel" ? "cancelled" : "scheduled";
 
   const dateSource = [fields.dateTime, leftovers.join(" "), original].filter(Boolean).join(" | ");
   const date = parseDate(dateSource, receivedAt);
@@ -270,6 +283,7 @@ export function parseMessage(text, options = {}) {
       extras,
       originalText: original.trim(),
       receivedAt: receivedAt.toISOString(),
+      intent,
     },
     alerts,
     missing,
