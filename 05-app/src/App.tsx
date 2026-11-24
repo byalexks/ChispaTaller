@@ -793,7 +793,7 @@ export default function App() {
       }
       setText((current) => (current.trim() ? `${current}\n\n${value}` : value));
     } catch {
-      setToast("El navegador no dejó leer el portapapeles. Pegá con Ctrl+V.");
+      showToast("El navegador no dejó leer el portapapeles. Pegá con Ctrl+V.", "error");
     }
   }
 
