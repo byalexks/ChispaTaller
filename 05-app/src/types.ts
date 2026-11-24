@@ -86,6 +86,8 @@ export interface Appointment extends Draft {
   photoId: string | null;
   photoIds?: string[];
   previousDate?: string | null;
+  googleEventId?: string | null;
+  googleSyncedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

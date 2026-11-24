@@ -716,6 +716,8 @@ export async function saveDrafts(
       closedAt: null,
       photoId: null,
       photoIds: [],
+      googleEventId: null,
+      googleSyncedAt: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -1092,6 +1094,21 @@ export async function closeAppointment(
     closedAt: now,
     photoIds: [...kept, ...added],
     updatedAt: now,
+  });
+}
+
+export async function updateAppointmentSync(
+  id: string,
+  eventId: string | null,
+  syncedAt: string
+): Promise<void> {
+  const db = await getDb();
+  const appointment = await db.get("appointments", id);
+  if (!appointment) return;
+  await db.put("appointments", {
+    ...appointment,
+    googleEventId: eventId,
+    googleSyncedAt: syncedAt,
   });
 }
 

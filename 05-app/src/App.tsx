@@ -40,12 +40,21 @@ import {
   updateScheduleBlock,
   updateTechnician,
   updateLocation,
+  updateAppointmentSync,
   weekdayOf,
   weekOverview,
   windowOf,
 } from "./db";
 import { compressPhoto } from "./images";
 import { exportBackup, importBackup } from "./backup";
+import {
+  connect as connectGoogle,
+  deleteEvent as deleteGoogleEvent,
+  insertEvent as insertGoogleEvent,
+  isConnected as isGoogleConnected,
+  patchEvent as patchGoogleEvent,
+  type GoogleEvent,
+} from "./google";
 import { downloadCsv, downloadJson, downloadBlob, safeFileName } from "./export";
 import { zipSync } from "fflate";
 import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
@@ -200,6 +209,8 @@ export default function App() {
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
   const [closingReminder, setClosingReminder] = useState(false);
   const [backupDays, setBackupDays] = useState<number | null>(null);
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dim">(() => {
@@ -241,6 +252,7 @@ export default function App() {
     ]);
     setLastBackupAt(backup);
     setClosingReminder(closing === "1");
+    setGoogleConnected(isGoogleConnected());
     if (backup) {
       const days = Math.floor((Date.now() - new Date(backup).getTime()) / 86_400_000);
       setBackupDays(days >= 7 ? days : null);
@@ -364,6 +376,94 @@ export default function App() {
       days.map((day) => appointmentsForDay(day.date, technician.id))
     );
     setWeekAppointments(lists.flat());
+  }
+
+  function googleBody(appointment: Appointment): GoogleEvent {
+    const place = locations.find((location) => location.id === appointment.locationId)?.name ?? "";
+    const day = appointment.date as string;
+    const time = appointment.time as string;
+    const endTime =
+      appointment.endTime ?? `${String(Number(time.slice(0, 2)) + 1).padStart(2, "0")}:00`;
+
+    return {
+      summary: `${appointment.type ? TYPE_LABEL[appointment.type] : "Cita"} · ${
+        appointment.name ?? ""
+      }`,
+      location: place,
+      description: `Cita ${appointment.id}`,
+      start: { dateTime: `${day}T${time}:00`, timeZone: "America/Bogota" },
+      end: { dateTime: `${day}T${endTime}:00`, timeZone: "America/Bogota" },
+    };
+  }
+
+  async function syncGoogle(force = false) {
+    if (!technician || !isGoogleConnected() || syncing) return;
+
+    setSyncing(true);
+    try {
+      const days = await weekOverview(weekStart, technician.id);
+      const lists = await Promise.all(
+        days.map((day) => appointmentsForDay(day.date, technician.id))
+      );
+      const appointments = lists.flat();
+
+      const pending = appointments.filter((appointment) => {
+        if (appointment.status === "cancelled") return Boolean(appointment.googleEventId);
+        if (!appointment.googleEventId) return true;
+        return (
+          force || (appointment.updatedAt ?? "") > (appointment.googleSyncedAt ?? "")
+        );
+      });
+
+      if (!pending.length) {
+        setToast("Google Calendar ya está al día");
+        return;
+      }
+
+      for (const appointment of pending) {
+        if (appointment.status === "cancelled" && appointment.googleEventId) {
+          await deleteGoogleEvent(appointment.googleEventId);
+          await updateAppointmentSync(appointment.id, null, new Date().toISOString());
+          continue;
+        }
+        if (!appointment.date || !appointment.time) continue;
+
+        const body = googleBody(appointment);
+        if (appointment.googleEventId) {
+          await patchGoogleEvent(appointment.googleEventId, body);
+          await updateAppointmentSync(
+            appointment.id,
+            appointment.googleEventId,
+            new Date().toISOString()
+          );
+        } else {
+          const eventId = await insertGoogleEvent(body);
+          await updateAppointmentSync(appointment.id, eventId, new Date().toISOString());
+        }
+      }
+
+      await refreshAll();
+      setToast(
+        `${pending.length} cita${pending.length === 1 ? "" : "s"} sincronizada${
+          pending.length === 1 ? "" : "s"
+        } con Google`
+      );
+    } catch (error) {
+      setToast(error instanceof Error ? error.message.slice(0, 70) : "No se pudo sincronizar");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleConnectGoogle(clientId: string) {
+    try {
+      await connectGoogle(clientId);
+      setGoogleConnected(true);
+      await syncGoogle(true);
+      setToast("Google Calendar conectado");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "No se pudo conectar con Google");
+    }
   }
 
   async function openClient(client: TechnicianClient) {
@@ -553,6 +653,7 @@ export default function App() {
       setDrafts([]);
       setText("");
       await refresh();
+      void syncGoogle();
       const parts = [`${result.saved} cita${result.saved === 1 ? "" : "s"} guardada${result.saved === 1 ? "" : "s"}`];
       if (result.inbox) parts.push(`${result.inbox} a bandeja`);
       if (otherDays) parts.push(`${otherDays} para otro día`);
@@ -814,6 +915,7 @@ export default function App() {
           onSaved={async () => {
             setManualOpen(false);
             await refresh();
+            void syncGoogle();
             setToast("Cita creada");
           }}
         />
@@ -841,6 +943,7 @@ export default function App() {
           onSaved={async () => {
             setVisit(null);
             await refresh();
+            void syncGoogle();
             setToast("Visita cerrada");
           }}
         />
@@ -866,6 +969,10 @@ export default function App() {
           closingReminder={closingReminder}
           onToggleClosing={(value) => void toggleClosingReminder(value)}
           onBackupDone={() => void markBackupDone()}
+          googleConnected={googleConnected}
+          syncing={syncing}
+          onConnectGoogle={handleConnectGoogle}
+          onSyncGoogle={() => void syncGoogle()}
           onClose={() => setProfileOpen(false)}
           onSaved={async () => {
             const updated = await getTechnician(technician.id);
@@ -2506,6 +2613,10 @@ function ProfileSheet({
   closingReminder,
   onToggleClosing,
   onBackupDone,
+  googleConnected,
+  syncing,
+  onConnectGoogle,
+  onSyncGoogle,
   onClose,
   onSaved,
   onLogout,
@@ -2515,6 +2626,10 @@ function ProfileSheet({
   closingReminder: boolean;
   onToggleClosing: (value: boolean) => void;
   onBackupDone: () => void;
+  googleConnected: boolean;
+  syncing: boolean;
+  onConnectGoogle: (clientId: string) => Promise<void>;
+  onSyncGoogle: () => void;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   onLogout: () => void;
@@ -2526,6 +2641,16 @@ function ProfileSheet({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [pendingImport, setPendingImport] = useState<File | null>(null);
+  const [clientId, setClientId] = useState("");
+
+  useEffect(() => {
+    void getSetting("googleClientId").then((value) => setClientId(value ?? ""));
+  }, []);
+
+  async function saveAndConnect() {
+    await setSetting("googleClientId", clientId.trim());
+    await onConnectGoogle(clientId.trim());
+  }
 
   async function handleExport() {
     const blob = await exportBackup();
@@ -2666,6 +2791,40 @@ function ProfileSheet({
             Último respaldo:{" "}
             {lastBackupAt ? new Date(lastBackupAt).toLocaleString("es-CO") : "nunca"}
           </p>
+        </div>
+
+        <div className="rounded-xl border border-line bg-surface p-3">
+          <p className="text-xs font-semibold">Google Calendar</p>
+          <p className="text-[10px] text-muted">
+            Sincroniza la semana visible. Solo actualiza las citas que cambiaron.
+          </p>
+          {googleConnected ? (
+            <button
+              type="button"
+              onClick={onSyncGoogle}
+              disabled={syncing}
+              className="mt-2 h-9 w-full rounded-lg bg-brand-solid text-[11px] font-semibold text-white disabled:opacity-50"
+            >
+              {syncing ? "Sincronizando…" : "Sincronizar ahora"}
+            </button>
+          ) : (
+            <>
+              <input
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
+                placeholder="Client ID de Google"
+                aria-label="Client ID de Google"
+                className="mt-2 w-full rounded-lg border border-line bg-canvas px-2 py-2 text-[11px] outline-none focus:border-brand"
+              />
+              <button
+                type="button"
+                onClick={() => void saveAndConnect()}
+                className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand"
+              >
+                Guardar y conectar
+              </button>
+            </>
+          )}
         </div>
 
         {error && <p className="rounded-lg bg-danger-soft px-2 py-1.5 text-xs text-danger">{error}</p>}
