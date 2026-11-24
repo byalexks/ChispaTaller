@@ -106,6 +106,7 @@ export interface Technician {
   pin: string;
   color: string;
   active: boolean;
+  hint?: string;
 }
 
 export interface TechnicianClient {

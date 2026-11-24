@@ -348,7 +348,7 @@ export async function createTechnician(name: string, pin: string): Promise<Techn
 
 export async function updateTechnician(
   id: string,
-  patch: Partial<Pick<Technician, "name" | "pin" | "active" | "color">>
+  patch: Partial<Pick<Technician, "name" | "pin" | "active" | "color" | "hint">>
 ): Promise<void> {
   const db = await getDb();
   const technician = await db.get("technicians", id);
@@ -415,6 +415,12 @@ export async function clientsOfTechnician(id: string): Promise<TechnicianClient[
 export async function getTechnician(id: string): Promise<Technician | undefined> {
   const db = await getDb();
   return db.get("technicians", id);
+}
+
+/** Upserts a technician coming from the shared config. */
+export async function putTechnician(technician: Technician): Promise<void> {
+  const db = await getDb();
+  await db.put("technicians", technician);
 }
 
 export async function listLocations(includeInactive = true): Promise<Location[]> {

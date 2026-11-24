@@ -25,6 +25,30 @@ Siempre: **Implementar → Administrar implementaciones → lápiz → Nueva ver
 Implementar**. Sin eso, la web app sigue corriendo el código viejo (es la causa
 más común de “Token inválido” o de que no aparezca la hoja).
 
+## Configuración compartida (técnicos, PINs y PIN admin)
+
+Si querés que los PINs sean **iguales en todos los teléfonos**, la app los guarda
+en el script, **cifrados**, y los baja al abrir.
+
+- El script almacena `configCipher` en *Propiedades del script*: AES-GCM con llave
+  derivada del **TOKEN**. Sin token no se puede leer.
+- El admin cambia un técnico o un PIN → se publica solo.
+- Cada equipo baja la config al abrir. Sin internet, usa la última copia local.
+
+**Requisito:** el `TOKEN` del script **no puede estar vacío** para esta función.
+
+1. Poné una clave larga en `const TOKEN = "..."`.
+2. **Nueva versión** de la implementación.
+3. En cada equipo: **Mi perfil → Cierre automático** → URL `/exec` + token →
+   **Guardar**.
+4. Listo: los PINs y la pista quedan compartidos.
+
+## Pista del PIN (opcional)
+
+Cada técnico puede tener una **pista** (ej. “año del carro”) que se muestra en el
+login con “Ver pista”. Se configura en Mi perfil (el propio técnico) o en
+Administración → Editar técnico. El admin también tiene la suya.
+
 ## Probar que quedó bien
 
 Abrí la URL `/exec` en el navegador: debe devolver

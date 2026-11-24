@@ -18,6 +18,7 @@ import {
   getAdminPin,
   getSetting,
   photosForAppointment,
+  putTechnician,
   getTechnician,
   historyForClient,
   inboxCount as countInbox,
@@ -58,6 +59,7 @@ import {
 } from "./google";
 import { downloadCsv, downloadJson, downloadBlob, safeFileName } from "./export";
 import { buildDaily, buildRange, uploadDaily } from "./daily";
+import { pullConfig, pushConfig } from "./configSync";
 import { zipSync } from "fflate";
 import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
 import type {
@@ -345,6 +347,29 @@ export default function App() {
     }
   }
 
+  async function pushSharedConfig() {
+    try {
+      const [url, token] = await Promise.all([
+        getSetting("uploadUrl"),
+        getSetting("uploadToken"),
+      ]);
+      if (!url || !token) return;
+
+      const [list, adminPin, adminHint] = await Promise.all([
+        listTechnicians(true),
+        getAdminPin(),
+        getSetting("adminHint"),
+      ]);
+      await pushConfig(url, token, {
+        adminPin,
+        adminHint: adminHint ?? "",
+        technicians: list,
+      });
+    } catch {
+      // Sin red queda local; la próxima vez se sincroniza.
+    }
+  }
+
   async function testUpload() {
     const url = uploadUrl.trim();
     if (!url) {
@@ -413,8 +438,26 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
-      const roster = await listTechnicians();
-      setTechnicians(roster);
+      try {
+        const [url, token] = await Promise.all([
+          getSetting("uploadUrl"),
+          getSetting("uploadToken"),
+        ]);
+        if (url && token) {
+          const shared = await pullConfig(url, token);
+          if (shared) {
+            for (const tech of shared.technicians) {
+              await putTechnician(tech);
+            }
+            await setAdminPin(shared.adminPin);
+            await setSetting("adminHint", shared.adminHint ?? "");
+          }
+        }
+      } catch {
+        // Sin red o sin config: se usa lo local.
+      }
+
+      setTechnicians(await listTechnicians());
       const savedId = localStorage.getItem("technicianId");
       if (savedId) {
         const found = await getTechnician(savedId);
@@ -810,6 +853,7 @@ export default function App() {
       <>
         <AdminView
           onToast={setToast}
+          onConfigChanged={() => void pushSharedConfig()}
           onClose={() => {
             setAdminUnlocked(false);
             void listTechnicians().then(setTechnicians);
@@ -1122,6 +1166,7 @@ export default function App() {
           onSaved={async () => {
             const updated = await getTechnician(technician.id);
             if (updated) setTechnician(updated);
+            void pushSharedConfig();
             setProfileOpen(false);
             setToast("Perfil actualizado");
           }}
@@ -2021,6 +2066,14 @@ function Login({
   const [checking, setChecking] = useState(false);
   const [lockedUntil, setLockedUntil] = useState(0);
   const [remaining, setRemaining] = useState(0);
+  const [adminHint, setAdminHint] = useState("");
+  const [showHint, setShowHint] = useState(false);
+
+  useEffect(() => {
+    void getSetting("adminHint").then((value) => setAdminHint(value ?? ""));
+  }, []);
+
+  const hint = adminMode ? adminHint : selected?.hint ?? "";
 
   useEffect(() => {
     if (!lockedUntil) {
@@ -2145,6 +2198,20 @@ function Login({
             error && <p className="mt-2 text-center text-xs font-semibold text-danger">{error}</p>
           )}
           {checking && <p className="mt-2 text-center text-xs text-muted">Verificando…</p>}
+          {hint && (
+            <div className="mt-2 text-center">
+              <button
+                type="button"
+                onClick={() => setShowHint((value) => !value)}
+                className="text-[10px] text-muted underline"
+              >
+                {showHint ? "Ocultar pista" : "Ver pista"}
+              </button>
+              {showHint && (
+                <p className="mt-1 text-[10px] text-muted">Pista: {hint}</p>
+              )}
+            </div>
+          )}
           <p className="mt-6 text-center text-[11px] text-muted">PIN inicial: 9999</p>
         </div>
       ) : !selected ? (
@@ -2222,6 +2289,20 @@ function Login({
             </p>
           ) : (
             error && <p className="mt-2 text-center text-xs font-semibold text-danger">{error}</p>
+          )}
+          {hint && (
+            <div className="mt-2 text-center">
+              <button
+                type="button"
+                onClick={() => setShowHint((value) => !value)}
+                className="text-[10px] text-muted underline"
+              >
+                {showHint ? "Ocultar pista" : "Ver pista"}
+              </button>
+              {showHint && (
+                <p className="mt-1 text-[10px] text-muted">Pista: {hint}</p>
+              )}
+            </div>
           )}
           <p className="mt-6 text-center text-[11px] text-muted">PIN inicial del técnico: 1234</p>
           <p className="mt-2 text-center text-[10px] text-muted">versión {APP_VERSION}</p>
@@ -2851,6 +2932,7 @@ function ProfileSheet({
   onLogout: () => void;
 }) {
   const [name, setName] = useState(technician.name);
+  const [hint, setHint] = useState(technician.hint ?? "");
   const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
   const [repeatPin, setRepeatPin] = useState("");
@@ -2923,6 +3005,7 @@ function ProfileSheet({
     try {
       await updateTechnician(technician.id, {
         name: name.trim(),
+        hint: hint.trim(),
         ...(wantsPin ? { pin: newPin } : {}),
       });
       await onSaved();
@@ -2939,6 +3022,16 @@ function ProfileSheet({
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
+            className="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+          />
+        </label>
+
+        <label className="block">
+          <span className="text-xs font-semibold text-muted">Pista del PIN (opcional)</span>
+          <input
+            value={hint}
+            onChange={(event) => setHint(event.target.value)}
+            placeholder="Ej.: año del carro"
             className="mt-1 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
           />
         </label>
@@ -3172,7 +3265,15 @@ function ProfileSheet({
   );
 }
 
-function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
+function AdminView({
+  onClose,
+  onToast,
+  onConfigChanged,
+}: {
+  onClose: () => void;
+  onToast: (message: string) => void;
+  onConfigChanged: () => void;
+}) {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
@@ -3191,7 +3292,12 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
     city: string;
     aliases: string;
   } | null>(null);
-  const [editForm, setEditForm] = useState<{ id: string; name: string; pin: string } | null>(null);
+  const [editForm, setEditForm] = useState<{
+    id: string;
+    name: string;
+    pin: string;
+    hint: string;
+  } | null>(null);
   const [business, setBusiness] = useState<"day" | "clients" | null>(null);
   const [businessRows, setBusinessRows] = useState<Appointment[]>([]);
   const [businessClients, setBusinessClients] = useState<TechnicianClient[]>([]);
@@ -3204,6 +3310,7 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
   const [adminNew, setAdminNew] = useState("");
   const [adminRepeat, setAdminRepeat] = useState("");
   const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminHint, setAdminHint] = useState("");
   const [confirm, setConfirm] = useState<{
     title: string;
     body: string;
@@ -3217,6 +3324,7 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
     setTechnicians(list);
     setLocations(await listLocations(true));
     setAdminPinValue(await getAdminPin());
+    setAdminHint((await getSetting("adminHint")) ?? "");
     setUploadUrl((await getSetting("uploadUrl")) ?? "");
     setUploadToken((await getSetting("uploadToken")) ?? "");
     const entries = await Promise.all(
@@ -3243,6 +3351,7 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
     setName("");
     setPin("");
     onToast("Técnico agregado");
+    onConfigChanged();
     await load();
   }
 
@@ -3257,6 +3366,7 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
       run: async () => {
         await updateTechnician(technician.id, { active: nextActive });
         onToast(nextActive ? "Técnico activado" : "Técnico desactivado");
+        onConfigChanged();
         await load();
       },
     });
@@ -3270,7 +3380,10 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
       danger: true,
       run: async () => {
         const result = await deleteTechnician(technician.id);
-        if (result.ok) onToast("Técnico eliminado");
+        if (result.ok) {
+          onToast("Técnico eliminado");
+          onConfigChanged();
+        }
         setError(
           result.ok
             ? null
@@ -3418,10 +3531,15 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
       setError("El PIN debe tener 4 dígitos.");
       return;
     }
-    await updateTechnician(editForm.id, { name: editForm.name.trim(), pin: editForm.pin });
+    await updateTechnician(editForm.id, {
+      name: editForm.name.trim(),
+      pin: editForm.pin,
+      hint: editForm.hint.trim(),
+    });
     setEditForm(null);
     setError(null);
     onToast("Técnico actualizado");
+    onConfigChanged();
     await load();
   }
 
@@ -3564,12 +3682,14 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
       confirmLabel: "Cambiar",
       run: async () => {
         await setAdminPin(adminNew);
+        await setSetting("adminHint", adminHint.trim());
         setAdminPinValue(adminNew);
         setAdminCurrent("");
         setAdminNew("");
         setAdminRepeat("");
         setAdminError(null);
         onToast("PIN de administrador cambiado");
+        onConfigChanged();
       },
     });
   }
@@ -3820,6 +3940,13 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
             />
           </div>
           {adminError && <p className="mt-1 text-[10px] text-danger">{adminError}</p>}
+          <input
+            value={adminHint}
+            onChange={(event) => setAdminHint(event.target.value)}
+            placeholder="Pista del PIN (opcional)"
+            aria-label="Pista del PIN de administrador"
+            className="mt-1 w-full rounded-lg border border-line bg-canvas px-2 py-2 text-xs outline-none focus:border-brand"
+          />
           <button
             type="button"
             onClick={changeAdminPin}
@@ -3879,7 +4006,12 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
                 <button
                   type="button"
                   onClick={() =>
-                    setEditForm({ id: technician.id, name: technician.name, pin: technician.pin })
+                    setEditForm({
+                      id: technician.id,
+                      name: technician.name,
+                      pin: technician.pin,
+                      hint: technician.hint ?? "",
+                    })
                   }
                   className="rounded-lg border border-line py-1.5 text-[10px] font-semibold text-brand"
                 >
@@ -3988,6 +4120,13 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
               placeholder="PIN de 4 dígitos"
               inputMode="numeric"
               aria-label="PIN del técnico"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <input
+              value={editForm.hint}
+              onChange={(event) => setEditForm({ ...editForm, hint: event.target.value })}
+              placeholder="Pista del PIN (opcional)"
+              aria-label="Pista del PIN"
               className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
             />
             <p className="text-[10px] text-muted">

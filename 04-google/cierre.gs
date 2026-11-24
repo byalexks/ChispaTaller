@@ -30,6 +30,20 @@ function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
 
+    if (body.action === "config") {
+      if (!TOKEN) {
+        return json({ ok: false, error: "Configurá un TOKEN en el script" });
+      }
+      if (body.token !== TOKEN) {
+        return json({ ok: false, error: "Token inválido" });
+      }
+      PropertiesService.getScriptProperties().setProperty(
+        "configCipher",
+        body.cipher || ""
+      );
+      return json({ ok: true, mensaje: "Configuración guardada" });
+    }
+
     if (TOKEN && body.token !== TOKEN) {
       return json({ ok: false, error: "Token inválido" });
     }
@@ -85,7 +99,21 @@ function doPost(e) {
 }
 
 function doGet(e) {
-  const provided = e && e.parameter ? e.parameter.token : null;
+  const params = (e && e.parameter) || {};
+
+  if (params.action === "config") {
+    if (!TOKEN) {
+      return json({ ok: false, error: "Configurá un TOKEN en el script para compartir la configuración" });
+    }
+    if (params.token !== TOKEN) {
+      return json({ ok: false, error: "Token inválido" });
+    }
+    const cipher =
+      PropertiesService.getScriptProperties().getProperty("configCipher") || "";
+    return json({ ok: true, cipher });
+  }
+
+  const provided = params.token ? params.token : null;
   return json({
     ok: true,
     version: VERSION,
