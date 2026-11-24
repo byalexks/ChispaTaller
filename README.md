@@ -52,8 +52,23 @@ cd C:\pro\servicio-tecnico-agenda\05-app
 npm install
 npm run dev        # http://localhost:5173
 npm test           # parser, 10 pruebas
+npm run test:e2e   # 24 pasos con Playwright
 npm run build      # dist/ listo para publicar
 ```
+
+## En internet
+
+Sitio publicado con GitHub Pages:
+
+```
+https://byalexks.github.io/ChispaTaller/
+```
+
+Cada push a `main` reconstruye y publica (`.github/workflows/deploy.yml`).
+La app es una PWA: se puede instalar desde el navegador del celular.
+
+> El origen `https://byalexks.github.io` debe estar autorizado en el Client ID de
+> Google para que funcione el calendario.
 
 Técnicos de prueba: `Técnico 1`, `Técnico 2`, `Técnico 3` · PIN `1234`.
 
