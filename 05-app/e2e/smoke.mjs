@@ -94,9 +94,27 @@ try {
 
   await step("confirmar una cita", async () => {
     await page.getByText("Engerling Marrugo", { exact: true }).first().click();
-    await page.getByRole("button", { name: "Confirmar cita" }).click();
+    await page.getByRole("button", { name: "Confirmar", exact: true }).click();
     await pause(600);
     await page.getByText("Jornada mañana", { exact: false }).first().waitFor();
+  });
+
+  await step("crear una cita a mano", async () => {
+    await page.getByRole("button", { name: "Agregar" }).click();
+    await page.getByText("Cargar cita a mano", { exact: true }).click();
+    await page.getByPlaceholder("Nombre del cliente").fill("Cliente Manual");
+    await page.getByPlaceholder("Vehículo / modelo").fill("galaxy 3");
+    await page.getByPlaceholder("Teléfono (opcional)").fill("3001234567");
+    await page.getByRole("button", { name: "Convertir en cita" }).click();
+    await pause(900);
+    await page.getByText("Cliente Manual", { exact: true }).first().waitFor();
+  });
+
+  await step("marcar una cita como por confirmar", async () => {
+    await page.getByText("Cliente Manual", { exact: true }).first().click();
+    await page.getByRole("button", { name: "Por confirmar" }).click();
+    await pause(800);
+    await page.getByText("Por confirmar", { exact: true }).first().waitFor();
   });
 
   await step("cerrar visita con foto y observaciones", async () => {

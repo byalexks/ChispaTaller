@@ -187,6 +187,7 @@ export default function App() {
     availability: AvailabilityBlock[];
   } | null>(null);
   const [manualMessage, setManualMessage] = useState<InboxMessage | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
   const [visit, setVisit] = useState<Appointment | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -610,7 +611,14 @@ export default function App() {
             hint="Copiado del chat, tal cual"
             onClick={() => setSheet("paste")}
           />
-          <SheetAction title="Cargar cita a mano" hint="Pronto" disabled />
+          <SheetAction
+            title="Cargar cita a mano"
+            hint="Sin pasar por WhatsApp"
+            onClick={() => {
+              setSheet(null);
+              setManualOpen(true);
+            }}
+          />
           <SheetAction
             title="Mi horario de trabajo"
             hint="Bloques, cupos y locales"
@@ -699,6 +707,20 @@ export default function App() {
           onAdd={() => {
             setDayView(null);
             setSheet("actions");
+          }}
+        />
+      )}
+
+      {manualOpen && technician && (
+        <ManualAppointmentSheet
+          message={null}
+          technicianId={technician.id}
+          locations={locations}
+          onClose={() => setManualOpen(false)}
+          onSaved={async () => {
+            setManualOpen(false);
+            await refresh();
+            setToast("Cita creada");
           }}
         />
       )}
@@ -1948,20 +1970,29 @@ function VisitSheet({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              void setAppointmentStatus(appointment.id, "to_confirm").then(onSaved);
+            }}
+            className="h-10 rounded-xl border border-line bg-surface text-[11px] font-semibold text-warn"
+          >
+            Por confirmar
+          </button>
           <button
             type="button"
             onClick={() => {
               void setAppointmentStatus(appointment.id, "confirmed").then(onSaved);
             }}
-            className="h-10 rounded-xl border border-line bg-surface text-xs font-semibold text-brand"
+            className="h-10 rounded-xl border border-line bg-surface text-[11px] font-semibold text-brand"
           >
-            Confirmar cita
+            Confirmar
           </button>
           <button
             type="button"
             onClick={() => setMoving((value) => !value)}
-            className="h-10 rounded-xl border border-line bg-surface text-xs font-semibold text-muted"
+            className="h-10 rounded-xl border border-line bg-surface text-[11px] font-semibold text-muted"
           >
             Reprogramar
           </button>
@@ -3326,7 +3357,7 @@ function ManualAppointmentSheet({
   onClose,
   onSaved,
 }: {
-  message: InboxMessage;
+  message: InboxMessage | null;
   technicianId: string;
   locations: Location[];
   onClose: () => void;
@@ -3334,6 +3365,7 @@ function ManualAppointmentSheet({
 }) {
   const [name, setName] = useState("");
   const [model, setModel] = useState("");
+  const [phone, setPhone] = useState("");
   const [date, setDate] = useState(todayIso());
   const [time, setTime] = useState("08:00");
   const [type, setType] = useState<ServiceType>("maintenance");
@@ -3366,7 +3398,7 @@ function ManualAppointmentSheet({
         time: time || null,
         endTime: null,
         isWindow: false,
-        phone: null,
+        phone: phone.replace(/\D/g, "").slice(-10) || null,
         location: null,
         address: null,
         part: null,
@@ -3377,11 +3409,11 @@ function ManualAppointmentSheet({
         plate: null,
         serial: null,
         extras: {},
-        originalText: message.text,
-        receivedAt: message.receivedAt,
+        originalText: message?.text ?? "",
+        receivedAt: message?.receivedAt ?? new Date().toISOString(),
       };
       await saveDrafts([{ ...draft, locationId }], technicianId);
-      await deleteMessage(message.id);
+      if (message) await deleteMessage(message.id);
       await onSaved();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo guardar.");
@@ -3391,11 +3423,13 @@ function ManualAppointmentSheet({
   }
 
   return (
-    <Sheet title="Clasificar mensaje" onClose={onClose}>
+    <Sheet title={message ? "Clasificar mensaje" : "Nueva cita"} onClose={onClose}>
       <div className="max-h-[66vh] space-y-3 overflow-y-auto pr-1">
-        <p className="max-h-24 overflow-y-auto rounded-xl bg-surface p-3 text-[11px] whitespace-pre-line text-muted">
-          {message.text}
-        </p>
+        {message && (
+          <p className="max-h-24 overflow-y-auto rounded-xl bg-surface p-3 text-[11px] whitespace-pre-line text-muted">
+            {message.text}
+          </p>
+        )}
 
         <input
           value={name}
@@ -3407,6 +3441,15 @@ function ManualAppointmentSheet({
           value={model}
           onChange={(event) => setModel(event.target.value)}
           placeholder="Vehículo / modelo"
+          className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
+        />
+        <input
+          value={phone}
+          onChange={(event) =>
+            setPhone(event.target.value.replace(/[^\d+ ]/g, "").slice(0, 15))
+          }
+          placeholder="Teléfono (opcional)"
+          inputMode="tel"
           className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
         />
 
