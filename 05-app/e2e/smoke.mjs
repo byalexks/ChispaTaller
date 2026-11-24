@@ -114,6 +114,19 @@ try {
     await page.getByText("Jornada mañana", { exact: false }).first().waitFor();
   });
 
+  await step("descargar la foto de la visita", async () => {
+    await page.getByText("Engerling Marrugo", { exact: true }).first().click();
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: /Descargar 1 foto/ }).click(),
+    ]);
+    if (!download.suggestedFilename().endsWith(".jpg")) {
+      throw new Error(`Nombre inesperado: ${download.suggestedFilename()}`);
+    }
+    await pause(400);
+    await page.getByRole("button", { name: "Cerrar", exact: true }).first().click();
+  });
+
   await step("marcar una cita como no vino", async () => {
     await page.getByText("Luis Cárdenas", { exact: true }).first().click();
     await page.getByRole("button", { name: "No vino" }).click();
@@ -240,6 +253,20 @@ Problema: se reprograma porque la clienta viaja.`;
     await page.waitForTimeout(300);
     const theme = await page.evaluate(() => document.documentElement.dataset.theme);
     if (theme !== "dim") throw new Error(`Tema inesperado: ${theme}`);
+  });
+
+  await step("admin exporta las fotos del día en ZIP", async () => {
+    await page.getByTitle("Mi perfil").click();
+    await page.getByRole("button", { name: /Cerrar sesión/ }).click();
+    await page.getByRole("button", { name: /Administrar técnicos/ }).click();
+    await pin("9999");
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Fotos ZIP" }).click(),
+    ]);
+    if (!download.suggestedFilename().endsWith(".zip")) {
+      throw new Error(`No es ZIP: ${download.suggestedFilename()}`);
+    }
   });
 
   const realProblems = problems.filter(

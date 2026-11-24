@@ -80,6 +80,7 @@ export interface Appointment extends Draft {
   notes: string | null;
   closedAt: string | null;
   photoId: string | null;
+  photoIds?: string[];
   previousDate?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -87,6 +88,7 @@ export interface Appointment extends Draft {
 
 export interface VisitPhoto {
   id: string;
+  appointmentId: string;
   blob: Blob;
   mimeType: string;
   createdAt: string;

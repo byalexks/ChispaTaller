@@ -33,3 +33,22 @@ export function downloadJson(fileName: string, data: unknown): void {
   link.click();
   URL.revokeObjectURL(url);
 }
+
+export function downloadBlob(fileName: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Turns "Hilda de Ávila / C-0001" into a safe file name. */
+export function safeFileName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9-_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}

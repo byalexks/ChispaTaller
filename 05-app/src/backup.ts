@@ -17,7 +17,13 @@ interface BackupFile {
   exportedAt: string;
   tables: Record<string, unknown[]>;
   counters: [string, number][];
-  photos: { id: string; mimeType: string; createdAt: string; dataUrl: string }[];
+  photos: {
+    id: string;
+    appointmentId?: string;
+    mimeType: string;
+    createdAt: string;
+    dataUrl: string;
+  }[];
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -51,6 +57,7 @@ export async function exportBackup(): Promise<Blob> {
     photos: await Promise.all(
       photos.map(async (photo) => ({
         id: photo.id,
+        appointmentId: photo.appointmentId,
         mimeType: photo.mimeType,
         createdAt: photo.createdAt,
         dataUrl: await blobToDataUrl(photo.blob),
@@ -75,6 +82,7 @@ export async function importBackup(file: File): Promise<number> {
   const photos = await Promise.all(
     (payload.photos ?? []).map(async (photo) => ({
       id: photo.id,
+      appointmentId: photo.appointmentId ?? photo.id,
       mimeType: photo.mimeType,
       createdAt: photo.createdAt,
       blob: await (await fetch(photo.dataUrl)).blob(),

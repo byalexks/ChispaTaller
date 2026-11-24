@@ -20,7 +20,7 @@ import type {
 } from "./types";
 
 const DB_NAME = "agenda-servicio-tecnico";
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 /** Statuses that consume a slot. A rescheduled visit still happens on its new date. */
 export const OCCUPYING = new Set([
@@ -59,7 +59,7 @@ interface AgendaSchema extends DBSchema {
     value: InboxMessage;
     indexes: { byInbox: number };
   };
-  photos: { key: string; value: VisitPhoto };
+  photos: { key: string; value: VisitPhoto; indexes: { byAppointment: string } };
   counters: { key: string; value: number };
   settings: { key: string; value: string };
 }
@@ -200,6 +200,31 @@ async function migrateWindows(db: AgendaDB): Promise<void> {
   await tx.done;
 }
 
+/** One-time move from a single photo per visit to a list of photo ids. */
+async function migratePhotos(db: AgendaDB): Promise<void> {
+  if (await db.get("settings", "photos-v2")) return;
+
+  const photos = await db.getAll("photos");
+  const tx = db.transaction(["photos", "appointments", "settings"], "readwrite");
+
+  for (const photo of photos) {
+    if (!photo.appointmentId) {
+      await tx.objectStore("photos").put({ ...photo, appointmentId: photo.id });
+    }
+  }
+
+  const appointments = await tx.objectStore("appointments").getAll();
+  for (const appointment of appointments) {
+    const legacy = (appointment as Appointment & { photoId?: string | null }).photoId;
+    if (legacy && !appointment.photoIds?.length) {
+      await tx.objectStore("appointments").put({ ...appointment, photoIds: [legacy] });
+    }
+  }
+
+  await tx.objectStore("settings").put("1", "photos-v2");
+  await tx.done;
+}
+
 export function getDb(): Promise<AgendaDB> {
   if (!dbPromise) {
     dbPromise = openDB<AgendaSchema>(DB_NAME, DB_VERSION, {
@@ -247,7 +272,13 @@ export function getDb(): Promise<AgendaDB> {
           store.createIndex("byInbox", "inInbox");
         }
         if (!db.objectStoreNames.contains("photos")) {
-          db.createObjectStore("photos", { keyPath: "id" });
+          const store = db.createObjectStore("photos", { keyPath: "id" });
+          store.createIndex("byAppointment", "appointmentId");
+        } else if (oldVersion < 7) {
+          const store = tx.objectStore("photos");
+          if (!store.indexNames.contains("byAppointment")) {
+            store.createIndex("byAppointment", "appointmentId");
+          }
         }
         if (!db.objectStoreNames.contains("counters")) {
           db.createObjectStore("counters");
@@ -259,6 +290,7 @@ export function getDb(): Promise<AgendaDB> {
     }).then(async (db) => {
       await seedIfEmpty(db);
       await migrateWindows(db);
+      await migratePhotos(db);
       return db;
     });
   }
@@ -673,6 +705,7 @@ export async function saveDrafts(
       notes: null,
       closedAt: null,
       photoId: null,
+      photoIds: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -774,8 +807,10 @@ export async function clearTechnicianData(technicianId: string): Promise<number>
   const tx = db.transaction(["appointments", "messages", "photos"], "readwrite");
   for (const appointment of appointments) {
     await tx.objectStore("appointments").delete(appointment.id);
-    if (appointment.photoId) {
-      await tx.objectStore("photos").delete(appointment.photoId);
+    const photoIds =
+      appointment.photoIds ?? (appointment.photoId ? [appointment.photoId] : []);
+    for (const photoId of photoIds) {
+      await tx.objectStore("photos").delete(photoId);
     }
   }
   for (const message of messages) {
@@ -917,7 +952,8 @@ export async function closeAppointment(
   data: {
     status: AppointmentStatus;
     notes: string;
-    photo?: { blob: Blob; mimeType: string } | null;
+    newPhotos?: { blob: Blob; mimeType: string }[];
+    removePhotoIds?: string[];
   }
 ): Promise<void> {
   const db = await getDb();
@@ -925,13 +961,26 @@ export async function closeAppointment(
   if (!appointment) return;
 
   const now = new Date().toISOString();
-  if (data.photo) {
+  const currentIds =
+    appointment.photoIds ?? (appointment.photoId ? [appointment.photoId] : []);
+  const removing = data.removePhotoIds ?? [];
+  const kept = currentIds.filter((photoId) => !removing.includes(photoId));
+
+  for (const photoId of removing) {
+    await db.delete("photos", photoId);
+  }
+
+  const added: string[] = [];
+  for (const photo of data.newPhotos ?? []) {
+    const photoId = await nextId(db, "photos", "P");
     await db.put("photos", {
-      id,
-      blob: data.photo.blob,
-      mimeType: data.photo.mimeType,
+      id: photoId,
+      appointmentId: id,
+      blob: photo.blob,
+      mimeType: photo.mimeType,
       createdAt: now,
     });
+    added.push(photoId);
   }
 
   await db.put("appointments", {
@@ -939,9 +988,15 @@ export async function closeAppointment(
     status: data.status,
     notes: data.notes.trim() || null,
     closedAt: now,
-    photoId: data.photo ? id : appointment.photoId ?? null,
+    photoIds: [...kept, ...added],
     updatedAt: now,
   });
+}
+
+export async function photosForAppointment(appointmentId: string): Promise<VisitPhoto[]> {
+  const db = await getDb();
+  const items = await db.getAllFromIndex("photos", "byAppointment", appointmentId);
+  return items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export async function getPhoto(id: string): Promise<VisitPhoto | undefined> {

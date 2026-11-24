@@ -15,7 +15,7 @@ import {
   deleteTechnician,
   findMatch,
   getAdminPin,
-  getPhoto,
+  photosForAppointment,
   getTechnician,
   historyForClient,
   inboxCount as countInbox,
@@ -41,7 +41,8 @@ import {
 } from "./db";
 import { compressPhoto } from "./images";
 import { exportBackup, importBackup } from "./backup";
-import { downloadCsv, downloadJson } from "./export";
+import { downloadCsv, downloadJson, downloadBlob, safeFileName } from "./export";
+import { zipSync } from "fflate";
 import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
 import type {
   Alert,
@@ -1651,27 +1652,25 @@ function VisitSheet({
     appointment.status === "no_show" ? "no_show" : "attended"
   );
   const [notes, setNotes] = useState(appointment.notes ?? "");
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [existing, setExisting] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<{ id: string; url: string }[]>([]);
+  const [removed, setRemoved] = useState<string[]>([]);
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
   const [history, setHistory] = useState<Appointment[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
   const [newDate, setNewDate] = useState(appointment.date ?? todayIso());
-  const [zoomed, setZoomed] = useState(false);
 
   useEffect(() => {
-    let url: string | null = null;
+    let urls: string[] = [];
     let alive = true;
     void (async () => {
-      if (appointment.photoId) {
-        const photo = await getPhoto(appointment.photoId);
-        if (photo && alive) {
-          url = URL.createObjectURL(photo.blob);
-          setExisting(url);
-        }
-      }
+      const list = await photosForAppointment(appointment.id);
+      if (!alive) return;
+      urls = list.map((photo) => URL.createObjectURL(photo.blob));
+      setPhotos(list.map((photo, index) => ({ id: photo.id, url: urls[index] })));
       if (appointment.clientId) {
         const items = await historyForClient(appointment.clientId);
         if (alive) setHistory(items.filter((item) => item.id !== appointment.id).slice(0, 4));
@@ -1679,26 +1678,30 @@ function VisitSheet({
     })();
     return () => {
       alive = false;
-      if (url) URL.revokeObjectURL(url);
+      urls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [appointment]);
 
   useEffect(() => {
-    if (!file) {
-      setPreview(null);
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+    const urls = files.map((file) => URL.createObjectURL(file));
+    setPreviews(urls);
+    return () => urls.forEach((url) => URL.revokeObjectURL(url));
+  }, [files]);
 
   async function save() {
     setSaving(true);
     setError(null);
     try {
-      const photo = file ? await compressPhoto(file) : null;
-      await closeAppointment(appointment.id, { status: outcome, notes, photo });
+      const newPhotos: { blob: Blob; mimeType: string }[] = [];
+      for (const file of files) {
+        newPhotos.push(await compressPhoto(file));
+      }
+      await closeAppointment(appointment.id, {
+        status: outcome,
+        notes,
+        newPhotos,
+        removePhotoIds: removed,
+      });
       await onSaved();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo guardar.");
@@ -1707,7 +1710,15 @@ function VisitSheet({
     }
   }
 
-  const photoUrl = preview ?? existing;
+  const visible = photos.filter((photo) => !removed.includes(photo.id));
+
+  async function downloadPhotos() {
+    for (const [index, photo] of visible.entries()) {
+      const blob = await (await fetch(photo.url)).blob();
+      downloadBlob(`${appointment.id}-${index + 1}.jpg`, blob);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
 
   return (
     <Sheet title="Cerrar visita" onClose={onClose}>
@@ -1752,36 +1763,93 @@ function VisitSheet({
           );
         })()}
 
-        {photoUrl ? (
-          <button
-            type="button"
-            onClick={() => setZoomed(true)}
-            className="relative h-32 w-full overflow-hidden rounded-2xl border border-line bg-surface"
-          >
-            <img
-              src={photoUrl}
-              alt="Evidencia de la visita"
-              className="h-full w-full object-cover"
-            />
-            <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-semibold text-white">
-              Ver foto
-            </span>
-          </button>
-        ) : (
-          <label className="flex h-32 w-full cursor-pointer items-center justify-center overflow-hidden rounded-2xl border border-dashed border-line bg-surface text-center">
-            <span className="text-sm text-muted">
-              <span className="mb-1 block text-2xl">📷</span>
-              Tomar foto del vehículo
-            </span>
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-            />
-          </label>
-        )}
+        <div>
+          <p className="mb-1 text-xs font-semibold text-muted">
+            Fotos {visible.length + previews.length > 0 ? `(${visible.length + previews.length})` : ""}
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {visible.map((photo) => (
+              <div
+                key={photo.id}
+                className="relative aspect-square overflow-hidden rounded-xl border border-line bg-surface"
+              >
+                <button
+                  type="button"
+                  onClick={() => setZoomUrl(photo.url)}
+                  className="h-full w-full"
+                  aria-label="Ver foto"
+                >
+                  <img
+                    src={photo.url}
+                    alt="Evidencia de la visita"
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRemoved([...removed, photo.id])}
+                  aria-label="Quitar foto"
+                  className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-sm text-white"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+
+            {previews.map((url, index) => (
+              <div
+                key={url}
+                className="relative aspect-square overflow-hidden rounded-xl border border-line bg-surface"
+              >
+                <button
+                  type="button"
+                  onClick={() => setZoomUrl(url)}
+                  className="h-full w-full"
+                  aria-label="Ver foto"
+                >
+                  <img src={url} alt="Nueva evidencia" className="h-full w-full object-cover" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiles(files.filter((_, position) => position !== index))}
+                  aria-label="Quitar foto"
+                  className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-sm text-white"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+
+            <label className="grid aspect-square cursor-pointer place-items-center rounded-xl border border-dashed border-line bg-surface text-center">
+              <span className="text-xl leading-none text-muted">＋</span>
+              <span className="text-[9px] text-muted">Foto</span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                capture="environment"
+                className="hidden"
+                onChange={(event) => {
+                  const list = Array.from(event.target.files ?? []);
+                  setFiles([...files, ...list]);
+                  event.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+          {visible.length > 0 && (
+            <>
+              <p className="mt-1 text-[10px] text-muted">La × quita la foto al guardar.</p>
+              <button
+                type="button"
+                onClick={() => void downloadPhotos()}
+                className="mt-2 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand"
+              >
+                Descargar {visible.length} foto{visible.length === 1 ? "" : "s"}
+              </button>
+            </>
+          )}
+        </div>
 
         <div>
           <p className="mb-1 text-xs font-semibold text-muted">¿Cómo salió?</p>
@@ -1890,19 +1958,19 @@ function VisitSheet({
         {saving ? "Guardando…" : "Confirmar visita"}
       </button>
 
-      {zoomed && photoUrl && (
+      {zoomUrl && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4"
-          onClick={() => setZoomed(false)}
+          onClick={() => setZoomUrl(null)}
         >
           <img
-            src={photoUrl}
+            src={zoomUrl}
             alt="Evidencia de la visita"
             className="max-h-full max-w-full rounded-xl object-contain"
           />
           <button
             type="button"
-            onClick={() => setZoomed(false)}
+            onClick={() => setZoomUrl(null)}
             className="absolute right-4 top-4 rounded-full bg-white/15 px-3 py-2 text-xs font-semibold text-white"
           >
             Cerrar
@@ -2230,6 +2298,7 @@ function AdminView({ onClose }: { onClose: () => void }) {
     city: string;
     aliases: string;
   } | null>(null);
+  const [editForm, setEditForm] = useState<{ id: string; name: string; pin: string } | null>(null);
   const [adminPin, setAdminPinValue] = useState("");
   const [adminCurrent, setAdminCurrent] = useState("");
   const [adminNew, setAdminNew] = useState("");
@@ -2358,6 +2427,33 @@ function AdminView({ onClose }: { onClose: () => void }) {
     );
   }
 
+  async function exportDayPhotos() {
+    const date = todayIso();
+    const all = await allAppointmentsForDay(date);
+    const names = new Map(technicians.map((technician) => [technician.id, technician.name]));
+    const files: Record<string, Uint8Array> = {};
+    let total = 0;
+
+    for (const appointment of all) {
+      const photos = await photosForAppointment(appointment.id);
+      for (const [index, photo] of photos.entries()) {
+        const base = safeFileName(
+          `${names.get(appointment.technicianId) ?? "tecnico"}-${appointment.name ?? "cliente"}-${appointment.id}`
+        );
+        files[`${base}-${index + 1}.jpg`] = new Uint8Array(await photo.blob.arrayBuffer());
+        total += 1;
+      }
+    }
+
+    if (!total) {
+      setError("Hoy no hay fotos para exportar.");
+      return;
+    }
+    setError(null);
+    const zipped = zipSync(files);
+    downloadBlob(`fotos-${date}.zip`, new Blob([zipped], { type: "application/zip" }));
+  }
+
   async function exportClients(technician: Technician) {
     const list = await clientsOfTechnician(technician.id);
     downloadCsv(
@@ -2369,6 +2465,22 @@ function AdminView({ onClose }: { onClose: () => void }) {
         ultima_visita: client.lastDate ?? "",
       }))
     );
+  }
+
+  async function saveTechnician() {
+    if (!editForm) return;
+    if (editForm.name.trim().length < 2) {
+      setError("Escribí el nombre del técnico.");
+      return;
+    }
+    if (!/^\d{4}$/.test(editForm.pin)) {
+      setError("El PIN debe tener 4 dígitos.");
+      return;
+    }
+    await updateTechnician(editForm.id, { name: editForm.name.trim(), pin: editForm.pin });
+    setEditForm(null);
+    setError(null);
+    await load();
   }
 
   async function saveLocation() {
@@ -2474,13 +2586,22 @@ function AdminView({ onClose }: { onClose: () => void }) {
               <p className="text-xs font-semibold">Cierre del día</p>
               <p className="text-[10px] text-muted">Todas las citas de hoy, en CSV.</p>
             </div>
-            <button
-              type="button"
-              onClick={() => void exportDay()}
-              className="h-9 shrink-0 rounded-lg border border-line px-3 text-[11px] font-semibold text-brand"
-            >
-              Exportar CSV
-            </button>
+            <div className="flex shrink-0 gap-1">
+              <button
+                type="button"
+                onClick={() => void exportDay()}
+                className="h-9 rounded-lg border border-line px-2 text-[11px] font-semibold text-brand"
+              >
+                CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => void exportDayPhotos()}
+                className="h-9 rounded-lg border border-line px-2 text-[11px] font-semibold text-brand"
+              >
+                Fotos ZIP
+              </button>
+            </div>
           </div>
         </section>
 
@@ -2664,10 +2785,12 @@ function AdminView({ onClose }: { onClose: () => void }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void remove(technician)}
-                  className="rounded-lg border border-danger/30 py-1.5 text-[10px] font-semibold text-danger"
+                  onClick={() =>
+                    setEditForm({ id: technician.id, name: technician.name, pin: technician.pin })
+                  }
+                  className="rounded-lg border border-line py-1.5 text-[10px] font-semibold text-brand"
                 >
-                  Eliminar
+                  Editar
                 </button>
               </div>
 
@@ -2998,7 +3121,7 @@ function ClientSheet({
               {appointment.notes && (
                 <p className="mt-1 line-clamp-2 text-[11px] text-muted">{appointment.notes}</p>
               )}
-              {appointment.photoId && <p className="mt-1 text-[10px] text-brand">📷 con foto</p>}
+              {((appointment.photoIds?.length ?? 0) > 0 || appointment.photoId) && (<p className="mt-1 text-[10px] text-brand">📷 con foto</p>)}
             </button>
           ))
         )}
