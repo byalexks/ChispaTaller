@@ -7,6 +7,7 @@
 
 const TOKEN = "";
 const SHEET_NAME = "Cierre";
+const VERSION = "3";
 
 const HEADERS = [
   "ID",
@@ -87,6 +88,7 @@ function doGet(e) {
   const provided = e && e.parameter ? e.parameter.token : null;
   return json({
     ok: true,
+    version: VERSION,
     mensaje: "Chispa Taller listo",
     tokenConfigurado: Boolean(TOKEN),
     tokenOk: provided ? provided === TOKEN : null,
