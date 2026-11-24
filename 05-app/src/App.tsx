@@ -5,6 +5,7 @@ import {
   allAppointmentsOfTechnician,
   appointmentsForDay,
   availabilityForDay,
+  capacityFor,
   clearTechnicianData,
   clientsOfTechnician,
   closeAppointment,
@@ -25,6 +26,7 @@ import {
   listLocations,
   listSchedule,
   listTechnicians,
+  nextFreeSlot,
   rescheduleAppointment,
   resolveLocationText,
   saveDrafts,
@@ -33,6 +35,7 @@ import {
   setAppointmentStatus,
   setSetting,
   suggestLocationId,
+  timeConflict,
   todayIso,
   updateScheduleBlock,
   updateTechnician,
@@ -181,6 +184,8 @@ export default function App() {
   const [clientHistory, setClientHistory] = useState<TechnicianClient | null>(null);
   const [clientAppointments, setClientAppointments] = useState<Appointment[]>([]);
   const [weekStart, setWeekStart] = useState(todayIso());
+  const [weekAppointments, setWeekAppointments] = useState<Appointment[]>([]);
+  const [refreshAsk, setRefreshAsk] = useState(false);
   const [dayView, setDayView] = useState<{
     date: string;
     appointments: Appointment[];
@@ -292,13 +297,73 @@ export default function App() {
 
   useEffect(() => {
     if (!technician) return;
-    void weekOverview(weekStart, technician.id).then(setWeek);
+    void (async () => {
+      const days = await weekOverview(weekStart, technician.id);
+      setWeek(days);
+      const lists = await Promise.all(
+        days.map((day) => appointmentsForDay(day.date, technician.id))
+      );
+      setWeekAppointments(lists.flat());
+    })();
   }, [weekStart, technician]);
 
   function switchTechnician() {
     localStorage.removeItem("technicianId");
     setTechnician(null);
     setView("today");
+  }
+
+  function exportCalendar() {
+    if (weekAppointments.length === 0) return;
+
+    const stamp = `${new Date().toISOString().replace(/[-:]/g, "").split(".")[0]}Z`;
+    const place = new Map(locations.map((location) => [location.id, location.name]));
+    const addHour = (time: string) =>
+      `${String(Number(time.slice(0, 2)) + 1).padStart(2, "0")}:${time.slice(3)}`;
+
+    const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Chispa Taller//ES"];
+
+    for (const appointment of weekAppointments) {
+      if (!appointment.date || !appointment.time) continue;
+      if (appointment.status === "cancelled") continue;
+
+      const day = appointment.date.replace(/-/g, "");
+      const start = `${day}T${appointment.time.replace(":", "")}00`;
+      const endTime = appointment.endTime ?? addHour(appointment.time);
+      const end = `${day}T${endTime.replace(":", "")}00`;
+      const summary = `${appointment.type ? TYPE_LABEL[appointment.type] : "Cita"} · ${
+        appointment.name ?? ""
+      }`;
+
+      lines.push(
+        "BEGIN:VEVENT",
+        `UID:${appointment.id}@chispatalle`,
+        `DTSTAMP:${stamp}`,
+        `DTSTART:${start}`,
+        `DTEND:${end}`,
+        `SUMMARY:${summary}`,
+        `LOCATION:${appointment.locationId ? place.get(appointment.locationId) ?? "" : ""}`,
+        `DESCRIPTION:${(appointment.description ?? "").replace(/\n/g, " ")}`,
+        "END:VEVENT"
+      );
+    }
+
+    lines.push("END:VCALENDAR");
+    downloadBlob(
+      "chispa-taller.ics",
+      new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" })
+    );
+  }
+
+  async function refreshAll() {
+    await refresh();
+    if (!technician) return;
+    const days = await weekOverview(weekStart, technician.id);
+    setWeek(days);
+    const lists = await Promise.all(
+      days.map((day) => appointmentsForDay(day.date, technician.id))
+    );
+    setWeekAppointments(lists.flat());
   }
 
   async function openClient(client: TechnicianClient) {
@@ -436,6 +501,25 @@ export default function App() {
               ? "reschedule"
               : "update"
           : "create";
+        const capacity = appointment.date
+          ? await capacityFor(appointment.date, appointment.type, technician.id)
+          : null;
+        const conflict =
+          appointment.date && appointment.time && mode !== "cancel"
+            ? await timeConflict(
+                appointment.date,
+                appointment.time,
+                technician.id,
+                mode === "create" ? undefined : match?.id
+              )
+            : null;
+        const capacityFull = mode !== "update" && capacity ? capacity.free <= 0 : false;
+        const blocked = capacityFull || Boolean(conflict);
+        const suggestion =
+          blocked && appointment.date
+            ? await nextFreeSlot(appointment.date, appointment.type, technician.id)
+            : null;
+
         return {
           ...appointment,
           alerts: result.alerts,
@@ -445,6 +529,12 @@ export default function App() {
           matchLabel: match
             ? `${match.name} · ${match.date}${match.time ? ` · ${match.time}` : ""}`
             : null,
+          capacityFull,
+          capacityLabel: capacity ? `${capacity.occupied}/${capacity.capacity}` : null,
+          conflict: conflict
+            ? `${conflict.name ?? "otra cita"}${conflict.time ? ` a las ${conflict.time}` : ""}`
+            : null,
+          suggestion,
         } as ReviewDraft;
       })
     );
@@ -573,9 +663,13 @@ export default function App() {
         {view === "week" && (
           <WeekView
             days={week}
+            appointments={weekAppointments}
             onShift={(offset) => setWeekStart(isoWithOffset(weekStart, offset))}
             onOpenDay={(date) => void openDay(date)}
+            onOpen={(appointment) => setVisit(appointment)}
             onExport={() => void exportWeek()}
+            onExportCalendar={exportCalendar}
+            onRefresh={() => setRefreshAsk(true)}
           />
         )}
         {view === "clients" && (
@@ -748,6 +842,19 @@ export default function App() {
             setVisit(null);
             await refresh();
             setToast("Visita cerrada");
+          }}
+        />
+      )}
+
+      {refreshAsk && (
+        <ConfirmSheet
+          title="Actualizar"
+          body="Se recargan los datos guardados en este dispositivo. No se borra nada."
+          confirmLabel="Sí, actualizar"
+          onCancel={() => setRefreshAsk(false)}
+          onConfirm={() => {
+            setRefreshAsk(false);
+            void refreshAll();
           }}
         />
       )}
@@ -1024,15 +1131,24 @@ function InboxView({
 
 function WeekView({
   days,
+  appointments,
   onShift,
   onOpenDay,
+  onOpen,
   onExport,
+  onExportCalendar,
+  onRefresh,
 }: {
   days: DaySummary[];
+  appointments: Appointment[];
   onShift: (offset: number) => void;
   onOpenDay: (date: string) => void;
+  onOpen: (appointment: Appointment) => void;
   onExport: () => void;
+  onExportCalendar: () => void;
+  onRefresh: () => void;
 }) {
+  const [mode, setMode] = useState<"list" | "calendar">("list");
   const first = days[0]?.date;
   const last = days[days.length - 1]?.date;
 
@@ -1060,7 +1176,133 @@ function WeekView({
         </button>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center gap-1">
+        {(
+          [
+            { key: "list", label: "Lista" },
+            { key: "calendar", label: "Calendario" },
+          ] as const
+        ).map((option) => (
+          <button
+            key={option.key}
+            type="button"
+            onClick={() => setMode(option.key)}
+            className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ${
+              mode === option.key
+                ? "bg-brand-solid text-white"
+                : "border border-line bg-surface text-muted"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="ml-auto rounded-full border border-line bg-surface px-3 py-1.5 text-[11px] font-semibold text-muted"
+        >
+          Actualizar
+        </button>
+      </div>
+
+      {mode === "list" ? (
+        <div className="space-y-2">
+          {days.map((day) => (
+            <button
+              key={day.date}
+              type="button"
+              onClick={() => onOpenDay(day.date)}
+              className="flex w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3 text-left active:scale-[0.99]"
+            >
+              <div>
+                <p className="text-sm font-semibold capitalize">{formatShort(day.date)}</p>
+                <p className="text-[11px] text-muted">
+                  {day.appointments} cita{day.appointments === 1 ? "" : "s"}
+                </p>
+              </div>
+              <span
+                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                  day.free === 0 ? "bg-danger-soft text-danger" : "bg-brand-soft text-brand"
+                }`}
+              >
+                {day.free === 0 ? "Lleno" : `${day.free} libres`}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="overflow-x-auto pb-1">
+          <div className="min-w-[680px]">
+            <div className="grid grid-cols-7 gap-1">
+              {days.map((day) => (
+                <div
+                  key={day.date}
+                  className="text-center text-[10px] font-semibold capitalize text-muted"
+                >
+                  {formatShort(day.date)}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-1 grid grid-cols-7 gap-1">
+              {days.map((day) => (
+                <div
+                  key={day.date}
+                  className="relative rounded-lg border border-line bg-surface"
+                  style={{ height: 11 * 40 }}
+                  onClick={() => onOpenDay(day.date)}
+                >
+                  {appointments
+                    .filter((item) => item.date === day.date && item.time)
+                    .filter((item) => {
+                      const hour = Number((item.time as string).slice(0, 2));
+                      return hour >= 8 && hour <= 18;
+                    })
+                    .map((item) => {
+                      const hour = Number((item.time as string).slice(0, 2));
+                      const top = (hour - 8) * 40;
+                      const tone =
+                        item.status === "cancelled"
+                          ? "border-line bg-canvas text-muted line-through"
+                          : item.status === "no_show"
+                            ? "border-danger/30 bg-danger-soft text-danger"
+                            : item.status === "attended"
+                              ? "border-brand/30 bg-brand-soft text-brand"
+                              : "border-line bg-surface text-ink";
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpen(item);
+                          }}
+                          style={{ top, height: 38 }}
+                          className={`absolute inset-x-0.5 overflow-hidden rounded-md border px-1 text-left text-[9px] leading-tight ${tone}`}
+                        >
+                          <span className="block font-semibold">{item.time}</span>
+                          <span className="block truncate">
+                            {(item.name ?? "").split(" ")[0]}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <button
+          type="button"
+          onClick={onExportCalendar}
+          className="text-[11px] font-semibold text-brand"
+        >
+          Google Calendar (.ics)
+        </button>
         <button
           type="button"
           onClick={onExport}
@@ -1082,31 +1324,6 @@ function WeekView({
           </svg>
           Descargar todo (JSON)
         </button>
-      </div>
-
-      <div className="space-y-2">
-        {days.map((day) => (
-          <button
-            key={day.date}
-            type="button"
-            onClick={() => onOpenDay(day.date)}
-            className="flex w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3 text-left active:scale-[0.99]"
-          >
-            <div>
-              <p className="text-sm font-semibold capitalize">{formatShort(day.date)}</p>
-              <p className="text-[11px] text-muted">
-                {day.appointments} cita{day.appointments === 1 ? "" : "s"}
-              </p>
-            </div>
-            <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                day.free === 0 ? "bg-danger-soft text-danger" : "bg-brand-soft text-brand"
-              }`}
-            >
-              {day.free === 0 ? "Lleno" : `${day.free} libres`}
-            </span>
-          </button>
-        ))}
       </div>
     </div>
   );
@@ -1144,9 +1361,26 @@ function ReviewSheet({
             locations={locations}
             onLocationChange={(locationId) => update(index, { locationId })}
             onMode={(mode) => update(index, { mode })}
+            onUseSuggestion={(suggestion) =>
+              update(index, {
+                date: suggestion.date,
+                weekday: weekdayOf(suggestion.date),
+                time: suggestion.time,
+                capacityFull: false,
+                capacityLabel: null,
+                conflict: null,
+                suggestion: null,
+              })
+            }
           />
         ))}
       </div>
+
+      {drafts.some((draft) => draft.capacityFull || draft.conflict) && (
+        <p className="mt-3 rounded-lg bg-danger-soft px-2 py-1.5 text-[11px] text-danger">
+          Hay citas que no caben. Usá la sugerencia o cambiá la fecha antes de confirmar.
+        </p>
+      )}
 
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button
@@ -1158,7 +1392,7 @@ function ReviewSheet({
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || drafts.some((draft) => draft.capacityFull || draft.conflict)}
           onClick={onConfirm}
           className="h-12 rounded-xl bg-brand-solid text-sm font-semibold text-white active:scale-[0.99] disabled:opacity-50"
         >
@@ -1174,11 +1408,13 @@ function DraftCard({
   locations,
   onLocationChange,
   onMode,
+  onUseSuggestion,
 }: {
   draft: ReviewDraft;
   locations: Location[];
   onLocationChange: (locationId: string | null) => void;
   onMode: (mode: DraftMode) => void;
+  onUseSuggestion: (suggestion: { date: string; time: string }) => void;
 }) {
   const alerts: Alert[] = draft.alerts ?? [];
   const goesToInbox = !draft.name || !draft.date;
@@ -1212,6 +1448,32 @@ function DraftCard({
         {draft.date ? formatLong(draft.date) : "Sin fecha"}
         {draft.time ? ` · ${draft.time}` : ""}
       </p>
+
+      {draft.capacityLabel && (
+        <p className={`text-[10px] ${draft.capacityFull ? "text-danger" : "text-muted"}`}>
+          {WINDOW_LABEL[windowOf(draft.type)]}: {draft.capacityLabel}
+          {draft.capacityFull ? " · completa" : ""}
+        </p>
+      )}
+
+      {draft.conflict && (
+        <p className="text-[10px] text-danger">Choque de horario con {draft.conflict}</p>
+      )}
+
+      {(draft.capacityFull || draft.conflict) && (
+        <div className="mt-2 rounded-lg bg-danger-soft p-2">
+          <p className="text-[11px] font-semibold text-danger">No se puede registrar.</p>
+          {draft.suggestion && (
+            <button
+              type="button"
+              onClick={() => onUseSuggestion(draft.suggestion!)}
+              className="mt-1 text-[11px] font-semibold text-brand underline"
+            >
+              Usar {formatShort(draft.suggestion.date)} · {draft.suggestion.time}
+            </button>
+          )}
+        </div>
+      )}
 
       <select
         value={draft.locationId ?? ""}
@@ -2432,6 +2694,9 @@ function AdminView({ onClose }: { onClose: () => void }) {
     aliases: string;
   } | null>(null);
   const [editForm, setEditForm] = useState<{ id: string; name: string; pin: string } | null>(null);
+  const [business, setBusiness] = useState<"day" | "clients" | null>(null);
+  const [businessRows, setBusinessRows] = useState<Appointment[]>([]);
+  const [businessClients, setBusinessClients] = useState<TechnicianClient[]>([]);
   const [adminPin, setAdminPinValue] = useState("");
   const [adminCurrent, setAdminCurrent] = useState("");
   const [adminNew, setAdminNew] = useState("");
@@ -2557,6 +2822,40 @@ function AdminView({ onClose }: { onClose: () => void }) {
         valor: appointment.amount ?? "",
         observaciones: appointment.notes ?? "",
       }))
+    );
+  }
+
+  async function openBusiness(kind: "day" | "clients") {
+    setBusiness(kind);
+    if (kind === "day") {
+      setBusinessRows(await allAppointmentsForDay(todayIso()));
+      return;
+    }
+
+    const roster = await listTechnicians(true);
+    const lists = await Promise.all(roster.map((technician) => clientsOfTechnician(technician.id)));
+    const merged = new Map<string, TechnicianClient>();
+
+    for (const list of lists) {
+      for (const client of list) {
+        const current = merged.get(client.clientId);
+        if (current) {
+          current.visits += client.visits;
+          if (client.lastDate && (!current.lastDate || client.lastDate > current.lastDate)) {
+            current.lastDate = client.lastDate;
+          }
+          if (client.nextDate && (!current.nextDate || client.nextDate < current.nextDate)) {
+            current.nextDate = client.nextDate;
+          }
+          if (!current.phone && client.phone) current.phone = client.phone;
+        } else {
+          merged.set(client.clientId, { ...client });
+        }
+      }
+    }
+
+    setBusinessClients(
+      [...merged.values()].sort((a, b) => (b.lastDate ?? "").localeCompare(a.lastDate ?? ""))
     );
   }
 
@@ -2735,6 +3034,27 @@ function AdminView({ onClose }: { onClose: () => void }) {
                 Fotos ZIP
               </button>
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-line bg-surface p-3">
+          <p className="text-xs font-semibold">Todo el negocio</p>
+          <p className="text-[10px] text-muted">Todos los técnicos juntos, no uno por uno.</p>
+          <div className="mt-2 grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => void openBusiness("day")}
+              className="h-9 rounded-lg border border-line text-[11px] font-semibold text-brand"
+            >
+              Hoy (todos)
+            </button>
+            <button
+              type="button"
+              onClick={() => void openBusiness("clients")}
+              className="h-9 rounded-lg border border-line text-[11px] font-semibold text-brand"
+            >
+              Clientes (todos)
+            </button>
           </div>
         </section>
 
@@ -3050,6 +3370,70 @@ function AdminView({ onClose }: { onClose: () => void }) {
           >
             Guardar
           </button>
+        </Sheet>
+      )}
+
+      {business && (
+        <Sheet
+          title={business === "day" ? "Hoy · todo el negocio" : "Clientes · todo el negocio"}
+          onClose={() => setBusiness(null)}
+        >
+          {business === "day" ? (
+            businessRows.length === 0 ? (
+              <p className="text-sm text-muted">No hay citas hoy.</p>
+            ) : (
+              <div className="max-h-[55vh] space-y-1 overflow-y-auto">
+                <p className="mb-2 text-[11px] text-muted">{businessRows.length} citas hoy</p>
+                {businessRows.map((appointment) => (
+                  <div
+                    key={appointment.id}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-surface px-2 py-1.5 text-[11px]"
+                  >
+                    <span className="w-11 shrink-0 font-mono font-semibold">
+                      {appointment.time ?? "—"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold">{appointment.name ?? "Sin nombre"}</p>
+                      <p className="truncate text-[10px] text-muted">
+                        {technicians.find((item) => item.id === appointment.technicianId)?.name ??
+                          appointment.technicianId}
+                      </p>
+                    </div>
+                    <Label tone={STATUS_TONE[appointment.status]} dot>
+                      {STATUS_LABEL[appointment.status]}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : businessClients.length === 0 ? (
+            <p className="text-sm text-muted">Todavía no hay clientes.</p>
+          ) : (
+            <div className="max-h-[55vh] space-y-1 overflow-y-auto">
+              <p className="mb-2 text-[11px] text-muted">
+                {businessClients.length} clientes en todos los técnicos
+              </p>
+              {businessClients.map((client) => (
+                <div
+                  key={client.clientId}
+                  className="flex items-center justify-between gap-2 rounded-lg bg-surface px-2 py-1.5 text-[11px]"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">{client.name}</p>
+                    <p className="truncate text-[10px] text-muted">
+                      {client.phone ?? "sin teléfono"}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right text-[10px] text-muted">
+                    <p>
+                      {client.visits} visita{client.visits === 1 ? "" : "s"}
+                    </p>
+                    <p>{client.lastDate ? formatShort(client.lastDate) : "—"}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </Sheet>
       )}
 
@@ -3373,6 +3757,15 @@ function ManualAppointmentSheet({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [capacity, setCapacity] = useState<{
+    occupied: number;
+    capacity: number;
+    free: number;
+  } | null>(null);
+
+  useEffect(() => {
+    void capacityFor(date, type, technicianId).then(setCapacity);
+  }, [date, type, technicianId]);
 
   async function save() {
     if (name.trim().length < 2) {
@@ -3381,6 +3774,24 @@ function ManualAppointmentSheet({
     }
     if (!date) {
       setError("Falta la fecha.");
+      return;
+    }
+
+    if (capacity && capacity.free <= 0) {
+      const next = await nextFreeSlot(date, type, technicianId);
+      setError(
+        `La jornada está completa (${capacity.occupied}/${capacity.capacity}).${
+          next ? ` Próximo hueco: ${formatShort(next.date)} a las ${next.time}.` : ""
+        }`
+      );
+      return;
+    }
+
+    const conflict = await timeConflict(date, time, technicianId);
+    if (conflict) {
+      setError(
+        `Ya hay una cita a las ${conflict.time} (${conflict.name ?? "otro cliente"}). Cambiá la hora.`
+      );
       return;
     }
 
@@ -3467,6 +3878,13 @@ function ManualAppointmentSheet({
             className="w-full rounded-lg border border-line bg-surface px-2 py-2 text-sm"
           />
         </div>
+
+        {capacity && (
+          <p className={`text-[11px] ${capacity.free <= 0 ? "text-danger" : "text-muted"}`}>
+            {WINDOW_LABEL[windowOf(type)]}: {capacity.occupied}/{capacity.capacity}
+            {capacity.free <= 0 ? " · completa" : ` · quedan ${capacity.free}`}
+          </p>
+        )}
 
         <select
           value={type}

@@ -99,12 +99,23 @@ try {
     await page.getByText("Jornada mañana", { exact: false }).first().waitFor();
   });
 
+  await step("bloquea una cita en una hora ocupada", async () => {
+    await page.getByRole("button", { name: "Agregar" }).click();
+    await page.getByText("Cargar cita a mano", { exact: true }).click();
+    await page.getByPlaceholder("Nombre del cliente").fill("Choque");
+    await page.locator('input[type="time"]').fill("08:00");
+    await page.getByRole("button", { name: "Convertir en cita" }).click();
+    await page.getByText(/Ya hay una cita a las 08:00/).waitFor();
+    await page.getByRole("button", { name: "Cerrar", exact: true }).click();
+  });
+
   await step("crear una cita a mano", async () => {
     await page.getByRole("button", { name: "Agregar" }).click();
     await page.getByText("Cargar cita a mano", { exact: true }).click();
     await page.getByPlaceholder("Nombre del cliente").fill("Cliente Manual");
     await page.getByPlaceholder("Vehículo / modelo").fill("galaxy 3");
     await page.getByPlaceholder("Teléfono (opcional)").fill("3001234567");
+    await page.locator('input[type="time"]').fill("11:00");
     await page.getByRole("button", { name: "Convertir en cita" }).click();
     await pause(900);
     await page.getByText("Cliente Manual", { exact: true }).first().waitFor();
@@ -159,6 +170,25 @@ try {
     await page.locator("button").filter({ hasText: /\d+ cita/ }).first().click();
     await page.getByText(/Jornada (mañana|tarde)/).first().waitFor();
     await page.getByRole("button", { name: "Cerrar", exact: true }).click();
+  });
+
+  await step("semana en vista calendario y .ics", async () => {
+    await page.getByRole("button", { name: "Calendario", exact: true }).click();
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: /Google Calendar/ }).click(),
+    ]);
+    if (!download.suggestedFilename().endsWith(".ics")) {
+      throw new Error(`No es .ics: ${download.suggestedFilename()}`);
+    }
+    await page.getByRole("button", { name: "Lista", exact: true }).click();
+  });
+
+  await step("actualizar con confirmación", async () => {
+    await page.getByRole("button", { name: "Actualizar", exact: true }).click();
+    await page.getByRole("button", { name: "Sí, actualizar", exact: true }).click();
+    await pause(600);
+    await page.getByRole("button", { name: /Descargar todo/ }).waitFor();
   });
 
   await step("exportar todo en JSON", async () => {

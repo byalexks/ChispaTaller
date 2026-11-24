@@ -772,7 +772,9 @@ export async function seedDemoData(technicianId: string): Promise<number> {
 
   const drafts = DEMO_PEOPLE.map((person, index) => {
     const date = isoWithOffset(base, index % 6);
-    const time = person.type === "maintenance" ? "08:00" : "14:00";
+    const hour =
+      person.type === "maintenance" ? 8 + (index % 4) : 13 + (index % 5);
+    const time = `${String(hour).padStart(2, "0")}:00`;
     const draft: Draft = {
       type: person.type,
       secondaryType: person.part ? "part" : null,
@@ -782,7 +784,7 @@ export async function seedDemoData(technicianId: string): Promise<number> {
       date,
       weekday: weekdayOf(date),
       time,
-      endTime: person.type === "maintenance" ? "09:00" : "16:00",
+      endTime: `${String(hour + 1).padStart(2, "0")}:00`,
       isWindow: true,
       phone: person.phone,
       location: null,
@@ -888,6 +890,96 @@ export async function availabilityForDay(
       state: free === 0 ? "full" : free === 1 ? "last" : "available",
     };
   });
+}
+
+export async function capacityFor(
+  date: string,
+  type: ServiceType | null,
+  technicianId: string
+): Promise<{
+  occupied: number;
+  capacity: number;
+  free: number;
+  local: string;
+  window: WindowKey;
+} | null> {
+  const availability = await availabilityForDay(date, technicianId);
+  const block = availability.find((item) => item.window === windowOf(type));
+  if (!block) return null;
+  return {
+    occupied: block.occupied,
+    capacity: block.capacity,
+    free: block.free,
+    local: block.locationName,
+    window: block.window,
+  };
+}
+
+export async function nextAvailableDate(
+  fromDate: string,
+  type: ServiceType | null,
+  technicianId: string,
+  maxDays = 14
+): Promise<string | null> {
+  for (let offset = 0; offset < maxDays; offset += 1) {
+    const date = isoWithOffset(fromDate, offset);
+    const capacity = await capacityFor(date, type, technicianId);
+    if (capacity && capacity.free > 0) return date;
+  }
+  return null;
+}
+
+const WINDOW_HOURS: Record<WindowKey, { from: number; to: number }> = {
+  morning: { from: 8, to: 12 },
+  afternoon: { from: 13, to: 18 },
+};
+
+function toMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+/** A technician cannot be in two places at once: each visit blocks one hour. */
+export async function timeConflict(
+  date: string,
+  time: string,
+  technicianId: string,
+  excludeId?: string
+): Promise<Appointment | null> {
+  const items = await appointmentsForDay(date, technicianId);
+  const start = toMinutes(time);
+  const end = start + 60;
+
+  for (const appointment of items) {
+    if (appointment.id === excludeId) continue;
+    if (!OCCUPYING.has(appointment.status) || !appointment.time) continue;
+    const otherStart = toMinutes(appointment.time);
+    const otherEnd = appointment.endTime ? toMinutes(appointment.endTime) : otherStart + 60;
+    if (start < otherEnd && otherStart < end) return appointment;
+  }
+  return null;
+}
+
+/** First free date and hour for a service, scanning two weeks. */
+export async function nextFreeSlot(
+  fromDate: string,
+  type: ServiceType | null,
+  technicianId: string,
+  maxDays = 14
+): Promise<{ date: string; time: string } | null> {
+  const hours = WINDOW_HOURS[windowOf(type)];
+
+  for (let offset = 0; offset < maxDays; offset += 1) {
+    const date = isoWithOffset(fromDate, offset);
+    const capacity = await capacityFor(date, type, technicianId);
+    if (!capacity || capacity.free <= 0) continue;
+
+    for (let hour = hours.from; hour < hours.to; hour += 1) {
+      const time = `${String(hour).padStart(2, "0")}:00`;
+      if (!(await timeConflict(date, time, technicianId))) return { date, time };
+    }
+  }
+  return null;
 }
 
 export async function listInbox(): Promise<InboxMessage[]> {

@@ -64,6 +64,10 @@ export interface ReviewDraft extends Draft {
   mode: DraftMode;
   matchId: string | null;
   matchLabel: string | null;
+  capacityFull: boolean;
+  capacityLabel: string | null;
+  conflict: string | null;
+  suggestion: { date: string; time: string } | null;
 }
 
 export type DraftMode = "create" | "update" | "reschedule" | "cancel";
