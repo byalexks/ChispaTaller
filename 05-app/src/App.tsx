@@ -19,6 +19,7 @@ import {
   getSetting,
   photosForAppointment,
   putTechnician,
+  removeTechnicianRecord,
   getTechnician,
   historyForClient,
   inboxCount as countInbox,
@@ -443,28 +444,42 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [technician?.id, autoUpload, uploadUrl, uploadToken]);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [url, token] = await Promise.all([
-          getSetting("uploadUrl"),
-          getSetting("uploadToken"),
-        ]);
-        if (url && token) {
-          const shared = await pullConfig(url, token);
-          if (shared) {
-            for (const tech of shared.technicians) {
-              await putTechnician(tech);
-            }
-            await setAdminPin(shared.adminPin);
-            await setSetting("adminHint", shared.adminHint ?? "");
-          }
-        }
-      } catch {
-        // Sin red o sin config: se usa lo local.
+  async function pullSharedConfig() {
+    try {
+      const [url, token] = await Promise.all([
+        getSetting("uploadUrl"),
+        getSetting("uploadToken"),
+      ]);
+      if (!url || !token) return;
+
+      const shared = await pullConfig(url, token);
+      if (!shared) return;
+
+      for (const tech of shared.technicians) {
+        await putTechnician(tech);
       }
 
+      const cloudIds = new Set(shared.technicians.map((tech) => tech.id));
+      for (const local of await listTechnicians(true)) {
+        if (!cloudIds.has(local.id)) await removeTechnicianRecord(local.id);
+      }
+
+      await setAdminPin(shared.adminPin);
+      await setSetting("adminHint", shared.adminHint ?? "");
       setTechnicians(await listTechnicians());
+      if (technician) {
+        const fresh = await getTechnician(technician.id);
+        if (fresh) setTechnician(fresh);
+      }
+    } catch {
+      // Sin red o sin config: se usa lo local.
+    }
+  }
+
+  useEffect(() => {
+    void (async () => {
+      await pullSharedConfig();
+
       const savedId = localStorage.getItem("technicianId");
       if (savedId) {
         const found = await getTechnician(savedId);
@@ -473,6 +488,15 @@ export default function App() {
       setBooting(false);
     })();
   }, []);
+
+  useEffect(() => {
+    const onFocus = () => {
+      if (technician) void pullSharedConfig();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [technician?.id]);
 
   useEffect(() => {
     if (technician) void refresh();

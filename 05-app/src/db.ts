@@ -374,6 +374,12 @@ export async function deleteTechnician(
   return { ok: true, appointments: 0 };
 }
 
+/** Deletes only the technician record (keeps appointments), used when syncing config. */
+export async function removeTechnicianRecord(id: string): Promise<void> {
+  const db = await getDb();
+  await db.delete("technicians", id);
+}
+
 export async function clientsOfTechnician(id: string): Promise<TechnicianClient[]> {
   const db = await getDb();
   const appointments = await db.getAllFromIndex("appointments", "byTechnician", id);
