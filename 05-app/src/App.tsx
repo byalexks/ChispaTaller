@@ -347,13 +347,16 @@ export default function App() {
     }
   }
 
-  async function pushSharedConfig() {
+  async function pushSharedConfig(notify = false) {
     try {
       const [url, token] = await Promise.all([
         getSetting("uploadUrl"),
         getSetting("uploadToken"),
       ]);
-      if (!url || !token) return;
+      if (!url || !token) {
+        if (notify) showToast("Faltan la URL y el token en este equipo", "error");
+        return;
+      }
 
       const [list, adminPin, adminHint] = await Promise.all([
         listTechnicians(true),
@@ -365,8 +368,12 @@ export default function App() {
         adminHint: adminHint ?? "",
         technicians: list,
       });
-    } catch {
-      // Sin red queda local; la próxima vez se sincroniza.
+      if (notify) showToast("Configuración compartida actualizada");
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "No se pudo sincronizar la configuración",
+        "error"
+      );
     }
   }
 
@@ -854,6 +861,7 @@ export default function App() {
         <AdminView
           onToast={setToast}
           onConfigChanged={() => void pushSharedConfig()}
+          onSyncConfig={() => void pushSharedConfig(true)}
           onClose={() => {
             setAdminUnlocked(false);
             void listTechnicians().then(setTechnicians);
@@ -3269,10 +3277,12 @@ function AdminView({
   onClose,
   onToast,
   onConfigChanged,
+  onSyncConfig,
 }: {
   onClose: () => void;
   onToast: (message: string) => void;
   onConfigChanged: () => void;
+  onSyncConfig: () => void;
 }) {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [name, setName] = useState("");
@@ -3814,6 +3824,13 @@ function AdminView({
             className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand disabled:opacity-60"
           >
             Subir últimos 7 días
+          </button>
+          <button
+            type="button"
+            onClick={onSyncConfig}
+            className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand"
+          >
+            Sincronizar configuración (PINs)
           </button>
           {uploadStatus && <p className="mt-1 text-[10px] text-brand">{uploadStatus}</p>}
         </section>
