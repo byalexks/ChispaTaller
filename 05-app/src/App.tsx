@@ -728,6 +728,12 @@ export default function App() {
     }
   }
 
+  async function discardMessage(message: InboxMessage) {
+    await deleteMessage(message.id);
+    await refresh();
+    setToast("Mensaje descartado");
+  }
+
   async function openClient(client: TechnicianClient) {
     setClientHistory(client);
     setClientAppointments(await historyForClient(client.clientId));
@@ -1050,7 +1056,12 @@ export default function App() {
           />
         )}
         {view === "inbox" && (
-          <InboxView messages={inbox} onAdd={() => setSheet("actions")} onClassify={setManualMessage} />
+          <InboxView
+            messages={inbox}
+            onAdd={() => setSheet("actions")}
+            onClassify={setManualMessage}
+            onDelete={(message) => void discardMessage(message)}
+          />
         )}
         {view === "week" && (
           <WeekView
@@ -1588,24 +1599,32 @@ function InboxView({
   messages,
   onAdd,
   onClassify,
+  onDelete,
 }: {
   messages: InboxMessage[];
   onAdd: () => void;
   onClassify: (message: InboxMessage) => void;
+  onDelete: (message: InboxMessage) => void;
 }) {
   return (
     <div className="space-y-3">
-      <p className="rounded-xl bg-canvas px-3 py-2 text-[11px] text-muted">
-        Acá llegan solo los mensajes que la app <b>no pudo convertir en cita</b> (falta
-        el nombre o la fecha). Si lo que falta es el teléfono, el local o el vehículo,
-        la cita <b>se guarda igual</b> con un aviso dentro de la cita y en el cierre del
-        día. Tocá «Clasificar», completá los datos y se agenda.
-      </p>
+      <div className="rounded-xl bg-canvas px-3 py-2">
+        <p className="text-xs font-semibold">Pendientes ({messages.length})</p>
+        <p className="mt-1 text-[11px] text-muted">
+          Solo caen aquí los mensajes que <b>no se pudieron agendar</b> porque falta el
+          nombre o la fecha. Si lo que falta es el teléfono, el local o el vehículo, la
+          cita se guarda igual con un aviso.
+        </p>
+        <p className="mt-1 text-[11px] text-muted">
+          <b>Convertir en cita</b>: completás los datos y se agenda.{" "}
+          <b>Descartar</b>: no era una cita y se borra.
+        </p>
+      </div>
 
       {messages.length === 0 ? (
         <EmptyState
-          title="No hay mensajes pendientes"
-          body="Todo lo que pegaste se convirtió en cita. Los datos incompletos quedaron como avisos dentro de cada cita."
+          title="No hay pendientes"
+          body="Todos los mensajes se convirtieron en cita. Los datos incompletos quedaron como avisos dentro de cada cita."
           action="Pegar mensaje"
           onAction={onAdd}
           kind="message"
@@ -1619,13 +1638,22 @@ function InboxView({
             <p className="mt-1 line-clamp-4 whitespace-pre-line text-sm text-ink">
               {message.text}
             </p>
-            <button
-              type="button"
-              onClick={() => onClassify(message)}
-              className="mt-3 h-9 w-full rounded-lg border border-brand/40 text-xs font-semibold text-brand"
-            >
-              Clasificar
-            </button>
+            <div className="mt-3 grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                onClick={() => onClassify(message)}
+                className="h-9 rounded-lg border border-brand/40 text-xs font-semibold text-brand"
+              >
+                Convertir en cita
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(message)}
+                className="h-9 rounded-lg border border-line text-xs font-semibold text-muted"
+              >
+                Descartar
+              </button>
+            </div>
           </article>
         ))
       )}
@@ -2068,7 +2096,7 @@ function BottomNav({
 }) {
   const items = [
     { key: "today", label: "Hoy" },
-    { key: "inbox", label: "Mensajes" },
+    { key: "inbox", label: "Pendientes" },
     { key: "week", label: "Semana" },
     { key: "clients", label: "Clientes" },
   ] as const;
@@ -5337,7 +5365,7 @@ function ManualAppointmentSheet({
   }
 
   return (
-    <Sheet title={message ? "Clasificar mensaje" : "Nueva cita"} onClose={onClose}>
+    <Sheet title={message ? "Convertir en cita" : "Nueva cita"} onClose={onClose}>
       <div className="max-h-[66vh] space-y-3 overflow-y-auto pr-1">
         {message && (
           <p className="max-h-24 overflow-y-auto rounded-xl bg-surface p-3 text-[11px] whitespace-pre-line text-muted">
