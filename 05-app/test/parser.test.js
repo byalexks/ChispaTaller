@@ -98,6 +98,22 @@ test("a pasted forwarded chat is split into one block per message", () => {
   assert.match(blocks[2], /GARANTÍA/);
 });
 
+test("messages pasted back-to-back with tabs are split", () => {
+  const blocks = splitMessages(`${REVISION}\t${WARRANTY}`);
+
+  assert.equal(blocks.length, 2);
+  assert.match(blocks[0], /REVISION/);
+  assert.match(blocks[1], /INSTALACI/);
+});
+
+test("messages pasted without blank lines are split", () => {
+  const blocks = splitMessages(`${REVISION}\n${WARRANTY}`);
+
+  assert.equal(blocks.length, 2);
+  assert.match(blocks[0], /REVISION/);
+  assert.match(blocks[1], /INSTALACI/);
+});
+
 test("dates: the four formats found in the messages", () => {
   assert.equal(parseDate("viernes 20 - NOVIEMBRE -2026", RECEIVED_AT).date, "2026-11-20");
   assert.equal(parseDate("20 DE NOVIEMBRE", RECEIVED_AT).date, "2026-11-20");

@@ -31,6 +31,9 @@ const FORWARD_HEADER =
 const LABEL_LINE = /^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ][^:\n]{0,40}?)\s*:\s*(.*)$/;
 const MESSAGE_START =
   /^\s*\*?\s*(PROGRAMACION|PROGRAMACIÓN|REVISION|REVISIÓN|INSTALACION|INSTALACIÓN)\b/i;
+const HEADER_SOURCE =
+  "(?:\\[[^\\]]+\\]\\s*[^:\\n]{1,60}:\\s*)?\\*?\\s*(?:PROGRAMACION|PROGRAMACIÓN|REVISION|REVISIÓN|INSTALACION|INSTALACIÓN)\\b";
+const TAB_BEFORE_HEADER = new RegExp(`\\t+(?=${HEADER_SOURCE})`, "gi");
 
 function cleanLine(line) {
   let text = String(line ?? "").replace(FORWARD_HEADER, "").trim();
@@ -48,7 +51,11 @@ function cleanValue(value) {
 
 /** Splits a pasted chat into individual messages, one per template header. */
 export function splitMessages(text) {
-  const lines = String(text ?? "").split(/\r?\n/);
+  const source = String(text ?? "")
+    .replace(/\r\n/g, "\n")
+    // Messages pasted back-to-back with a tab instead of a blank line.
+    .replace(TAB_BEFORE_HEADER, "\n");
+  const lines = source.split("\n");
   const blocks = [];
   let current = [];
 

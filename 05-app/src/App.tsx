@@ -156,7 +156,7 @@ const WINDOW_LABEL: Record<"morning" | "afternoon", string> = {
   afternoon: "Jornada tarde",
 };
 
-const APP_VERSION = "0.3.2";
+const APP_VERSION = "0.3.3";
 
 const longDate = new Intl.DateTimeFormat("es-CO", {
   weekday: "long",
@@ -1156,7 +1156,9 @@ export default function App() {
       {sheet === "paste" && (
         <Sheet title="Pegar mensaje" onClose={() => setSheet(null)}>
           <p className="mb-3 text-sm text-muted">
-            Copiá el mensaje desde WhatsApp y pegalo acá. Podés pegar varios de una vez.
+            Copiá el mensaje desde WhatsApp y pegalo acá. Podés pegar varios de una vez,
+            incluso sin líneas en blanco: la app los separa cuando encuentra
+            PROGRAMACIÓN, REVISIÓN o INSTALACIÓN.
           </p>
           <p className="mb-3 rounded-xl bg-canvas px-3 py-2 text-[11px] text-muted">
             La app lee el mensaje y propone la cita. Si menciona una sede que todavía no
