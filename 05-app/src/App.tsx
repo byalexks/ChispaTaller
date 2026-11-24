@@ -213,6 +213,10 @@ export default function App() {
   const [backupDays, setBackupDays] = useState<number | null>(null);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [uploadUrl, setUploadUrl] = useState("");
+  const [uploadToken, setUploadToken] = useState("");
+  const [autoUpload, setAutoUpload] = useState(false);
+  const [autoUploading, setAutoUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dim">(() => {
@@ -254,6 +258,15 @@ export default function App() {
     ]);
     setLastBackupAt(backup);
     setClosingReminder(closing === "1");
+
+    const [url, token, auto] = await Promise.all([
+      getSetting("uploadUrl"),
+      getSetting("uploadToken"),
+      getSetting("autoUpload"),
+    ]);
+    setUploadUrl(url ?? "");
+    setUploadToken(token ?? "");
+    setAutoUpload(auto === "1");
     setGoogleConnected(isGoogleConnected());
     if (backup) {
       const days = Math.floor((Date.now() - new Date(backup).getTime()) / 86_400_000);
@@ -273,6 +286,7 @@ export default function App() {
       if ((await getSetting("lastClosingPrompt")) === today) return;
       await setSetting("lastClosingPrompt", today);
       setToast("Cierre del día: exportá el resumen desde el perfil.");
+      void autoUploadDay();
     };
 
     void check();
@@ -291,6 +305,82 @@ export default function App() {
     setBackupDays(null);
     await setSetting("lastBackupAt", now);
   }
+
+  /** After 18:00 the day is closed; before that, the pending day is yesterday. */
+  function autoTargetDate(): string {
+    const today = todayIso();
+    return new Date().getHours() >= 18 ? today : isoWithOffset(today, -1);
+  }
+
+  async function autoUploadDay(quiet = true) {
+    if (!autoUpload || !uploadUrl.trim()) return;
+
+    try {
+      const last = await getSetting("lastAutoUploadDate");
+      const target = autoTargetDate();
+      if (last && last >= target) return;
+
+      setAutoUploading(true);
+      const start = last && last < target ? isoWithOffset(last, 1) : target;
+      const payload = await buildRange(start, target);
+
+      if (!payload.total) {
+        await setSetting("lastAutoUploadDate", target);
+        return;
+      }
+
+      const message = await uploadDaily(uploadUrl.trim(), uploadToken.trim(), payload);
+      await setSetting("lastAutoUploadDate", target);
+      if (!quiet) setToast(message);
+    } catch (error) {
+      if (!quiet) setToast(error instanceof Error ? error.message : "No se pudo subir");
+    } finally {
+      setAutoUploading(false);
+    }
+  }
+
+  async function manualUpload() {
+    if (!uploadUrl.trim()) {
+      setToast("Configurá la URL del Apps Script en Mi perfil");
+      return;
+    }
+
+    setAutoUploading(true);
+    try {
+      const today = todayIso();
+      const last = await getSetting("lastAutoUploadDate");
+      const start = last && last < today ? isoWithOffset(last, 1) : today;
+      const payload = await buildRange(start, today);
+
+      if (!payload.total) {
+        setToast("No hay citas nuevas para subir");
+        return;
+      }
+
+      const message = await uploadDaily(uploadUrl.trim(), uploadToken.trim(), payload);
+      await setSetting("lastAutoUploadDate", today);
+      setToast(message);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "No se pudo subir");
+    } finally {
+      setAutoUploading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!technician || !autoUpload || !uploadUrl.trim()) return;
+
+    void autoUploadDay();
+    const timer = setInterval(() => void autoUploadDay(), 10 * 60 * 1000);
+    const onFocus = () => void autoUploadDay();
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [technician?.id, autoUpload, uploadUrl, uploadToken]);
 
   useEffect(() => {
     void (async () => {
@@ -986,6 +1076,17 @@ export default function App() {
           syncing={syncing}
           onConnectGoogle={handleConnectGoogle}
           onSyncGoogle={() => void syncGoogle(true)}
+          uploadUrl={uploadUrl}
+          uploadToken={uploadToken}
+          autoUpload={autoUpload}
+          uploading={autoUploading}
+          onManualUpload={() => void manualUpload()}
+          onSaveUpload={(url, token, auto) => {
+            setUploadUrl(url);
+            setUploadToken(token);
+            setAutoUpload(auto);
+            setToast(auto ? "Cierre automático activado" : "Cierre automático desactivado");
+          }}
           onToast={setToast}
           onClose={() => setProfileOpen(false)}
           onSaved={async () => {
@@ -1000,6 +1101,25 @@ export default function App() {
 
       <Toast message={toast} />
     </div>
+  );
+}
+
+function Spinner({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`animate-spin ${className}`}
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+      <path
+        d="M21 12a9 9 0 0 0-9-9"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
@@ -2651,6 +2771,12 @@ function ProfileSheet({
   syncing,
   onConnectGoogle,
   onSyncGoogle,
+  uploadUrl,
+  uploadToken,
+  autoUpload,
+  onSaveUpload,
+  uploading,
+  onManualUpload,
   onToast,
   onClose,
   onSaved,
@@ -2665,6 +2791,12 @@ function ProfileSheet({
   syncing: boolean;
   onConnectGoogle: (clientId: string) => Promise<void>;
   onSyncGoogle: () => void;
+  uploadUrl: string;
+  uploadToken: string;
+  autoUpload: boolean;
+  onSaveUpload: (url: string, token: string, auto: boolean) => void;
+  uploading: boolean;
+  onManualUpload: () => void;
   onToast: (message: string) => void;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
@@ -2678,6 +2810,19 @@ function ProfileSheet({
   const [saving, setSaving] = useState(false);
   const [pendingImport, setPendingImport] = useState<File | null>(null);
   const [clientId, setClientId] = useState("");
+  const [uploadForm, setUploadForm] = useState({ url: "", token: "", auto: false });
+
+  useEffect(() => {
+    setUploadForm({ url: uploadUrl, token: uploadToken, auto: autoUpload });
+  }, [uploadUrl, uploadToken, autoUpload]);
+
+  async function saveUploadConfig() {
+    await setSetting("uploadUrl", uploadForm.url.trim());
+    await setSetting("uploadToken", uploadForm.token.trim());
+    await setSetting("autoUpload", uploadForm.auto ? "1" : "0");
+    onToast("Cierre automático guardado");
+    onSaveUpload(uploadForm.url.trim(), uploadForm.token.trim(), uploadForm.auto);
+  }
 
   useEffect(() => {
     void getSetting("googleClientId").then((value) =>
@@ -2870,6 +3015,66 @@ function ProfileSheet({
           )}
         </div>
 
+        <div className="rounded-xl border border-line bg-surface p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold">Cierre automático a Google</p>
+              <p className="text-[10px] text-muted">
+                Se sube solo después de las 18:00. Si no abriste la app, se pone al día al
+                abrirla.
+              </p>
+            </div>
+            {uploading && (
+              <span className="flex items-center gap-1 text-[10px] font-semibold text-brand">
+                <Spinner className="h-3.5 w-3.5" />
+                Subiendo…
+              </span>
+            )}
+          </div>
+          <input
+            value={uploadForm.url}
+            onChange={(event) => setUploadForm({ ...uploadForm, url: event.target.value })}
+            placeholder="URL del Apps Script (/exec)"
+            aria-label="URL del Apps Script"
+            className="mt-2 w-full rounded-lg border border-line bg-canvas px-2 py-2 text-[11px] outline-none focus:border-brand"
+          />
+          <input
+            value={uploadForm.token}
+            onChange={(event) => setUploadForm({ ...uploadForm, token: event.target.value })}
+            placeholder="Token"
+            aria-label="Token del Apps Script"
+            className="mt-1 w-full rounded-lg border border-line bg-canvas px-2 py-2 text-[11px] outline-none focus:border-brand"
+          />
+          <div className="mt-1 grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => setUploadForm({ ...uploadForm, auto: !uploadForm.auto })}
+              className={`h-9 rounded-lg text-[11px] font-semibold ${
+                uploadForm.auto
+                  ? "bg-brand-solid text-white"
+                  : "border border-line bg-canvas text-muted"
+              }`}
+            >
+              {uploadForm.auto ? "Automático: sí" : "Automático: no"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveUploadConfig()}
+              className="h-9 rounded-lg border border-line text-[11px] font-semibold text-brand"
+            >
+              Guardar
+            </button>
+          </div>
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={onManualUpload}
+            className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand disabled:opacity-60"
+          >
+            {uploading ? "Subiendo…" : "Subir ahora"}
+          </button>
+        </div>
+
         {error && <p className="rounded-lg bg-danger-soft px-2 py-1.5 text-xs text-danger">{error}</p>}
 
         <button
@@ -2936,6 +3141,7 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
   const [uploadUrl, setUploadUrl] = useState("");
   const [uploadToken, setUploadToken] = useState("");
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [adminPin, setAdminPinValue] = useState("");
   const [adminCurrent, setAdminCurrent] = useState("");
   const [adminNew, setAdminNew] = useState("");
@@ -3217,6 +3423,7 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
       setError("Pegá la URL del Apps Script.");
       return;
     }
+    setUploading(true);
     try {
       const payload = await buildDaily(todayIso());
       if (!payload.total) {
@@ -3229,6 +3436,8 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
       onToast(message);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo subir.");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -3249,6 +3458,7 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
       setError("Pegá la URL del Apps Script.");
       return;
     }
+    setUploading(true);
     try {
       const today = todayIso();
       const payload = await buildRange(isoWithOffset(today, -6), today);
@@ -3262,6 +3472,8 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
       onToast(message);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo subir.");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -3404,16 +3616,25 @@ function AdminView({ onClose, onToast }: { onClose: () => void; onToast: (messag
             </button>
             <button
               type="button"
+              disabled={uploading}
               onClick={askUpload}
-              className="h-9 rounded-lg bg-brand-solid text-[11px] font-semibold text-white"
+              className="grid h-9 place-items-center rounded-lg bg-brand-solid text-[11px] font-semibold text-white disabled:opacity-60"
             >
-              Subir hoy
+              {uploading ? (
+                <span className="flex items-center gap-1">
+                  <Spinner className="h-3.5 w-3.5" />
+                  Subiendo…
+                </span>
+              ) : (
+                "Subir hoy"
+              )}
             </button>
           </div>
           <button
             type="button"
+            disabled={uploading}
             onClick={askUploadWeek}
-            className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand"
+            className="mt-1 h-9 w-full rounded-lg border border-line text-[11px] font-semibold text-brand disabled:opacity-60"
           >
             Subir últimos 7 días
           </button>
