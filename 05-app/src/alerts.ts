@@ -7,7 +7,7 @@ export const MISSING_VEHICLE_MESSAGE =
   "Sin vehículo o modelo: completalo para que el historial del cliente quede claro.";
 
 export function unknownLocationMessage(location: string): string {
-  return `El local "${location}" no está registrado. La cita se guarda sin local: pedile al administrador que lo cree en Administración → Locales.`;
+  return `La sede "${location}" no está registrada. La cita se guarda sin sede: pedile al administrador que la cree en Administración → Sedes.`;
 }
 
 /**

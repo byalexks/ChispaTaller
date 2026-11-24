@@ -373,7 +373,7 @@ Teléfono: 3005556677.`;
 
     await page.locator("textarea").first().fill(text);
     await page.getByRole("button", { name: "Procesar" }).click();
-    await page.getByText(/no está registrado/i).first().waitFor();
+    await page.getByText(/no está registrada/i).first().waitFor();
     await page.getByRole("button", { name: "Confirmar", exact: true }).click();
     await pause(900);
     await page.getByText(/con avisos/i).first().waitFor();

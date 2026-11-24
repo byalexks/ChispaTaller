@@ -78,7 +78,9 @@ el respaldo (exportar) todavía no está implementado.
 ## Reglas del producto
 
 - Sin IA: el parser lee etiquetas y valida.
-- El local de cada cita sale del **horario** del técnico, no del mensaje.
-- Cupos por **ventana**: mañana (recepción 8–9) y tarde (14–16).
+- La **sede** es un atributo de cada cita: sale del mensaje o se elige a mano. No
+  depende del horario.
+- Cupos **generales del técnico** por ventana: mañana (8:00-12:00) y tarde
+  (13:00-18:00). No se separan por sede.
 - Un mensaje puede **crear, actualizar o cancelar** una cita.
 - IDs secuenciales legibles en hexadecimal: `C-0001`, `CL-0001`.

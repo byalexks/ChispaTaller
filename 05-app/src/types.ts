@@ -149,14 +149,12 @@ export interface ScheduleBlock {
   weekday: number;
   from: string;
   to: string;
-  locationId: string;
   window: WindowKey;
   capacity: number;
   active: boolean;
 }
 
 export interface AvailabilityBlock extends ScheduleBlock {
-  locationName: string;
   occupied: number;
   free: number;
   state: "available" | "last" | "full";
@@ -176,4 +174,5 @@ export interface DaySummary {
   date: string;
   appointments: number;
   free: number;
+  closed: boolean;
 }

@@ -48,3 +48,13 @@ Formato: fecha · decisión · estado · motivo.
 
 > Al responder el cuestionario (`PREGUNTAS.md`), mover las decisiones de esta tabla
 > a "Cerradas" con la respuesta concreta.
+
+## 2026-11-24
+
+- **Cupos generales del técnico**, no por sede. La sede es un atributo de cada cita.
+- La jornada se determina por la **hora** de la cita (mañana 8:00-12:00, tarde
+  13:00-18:00), no por el tipo de servicio.
+- Las sedes son un catálogo editable: se pueden crear, renombrar y desactivar.
+- El calendario, las citas y el historial de cada cliente muestran la sede.
+- Cada técnico conecta su propia cuenta de Google Calendar (OAuth).
+

@@ -47,7 +47,7 @@ import {
   updateAppointmentSync,
   weekdayOf,
   weekOverview,
-  windowOf,
+  windowOfTime,
 } from "./db";
 import { compressPhoto } from "./images";
 import { dataAlerts } from "./alerts";
@@ -155,7 +155,7 @@ const WINDOW_LABEL: Record<"morning" | "afternoon", string> = {
   afternoon: "Jornada tarde",
 };
 
-const APP_VERSION = "0.3.0";
+const APP_VERSION = "0.3.1";
 
 const longDate = new Intl.DateTimeFormat("es-CO", {
   weekday: "long",
@@ -261,7 +261,7 @@ export default function App() {
         listInbox(),
         countInbox(),
         weekOverview(current, technician.id),
-        listLocations(false),
+        listLocations(true),
         clientsOfTechnician(technician.id),
       ]);
     setAppointments(dayAppointments);
@@ -801,7 +801,6 @@ export default function App() {
           jornadaTexto: WINDOW_LABEL[block.window],
           desde: block.from,
           hasta: block.to,
-          local: block.locationName,
           cupo: block.capacity,
           ocupados: block.occupied,
           libres: block.free,
@@ -826,7 +825,6 @@ export default function App() {
         jornada: block.window,
         desde: block.from,
         hasta: block.to,
-        local: place.get(block.locationId) ?? null,
         cupo: block.capacity,
         activo: block.active,
       })),
@@ -878,7 +876,12 @@ export default function App() {
               : "update"
           : "create";
         const capacity = appointment.date
-          ? await capacityFor(appointment.date, appointment.type, technician.id)
+          ? await capacityFor(
+              appointment.date,
+              appointment.type,
+              technician.id,
+              appointment.time
+            )
           : null;
         const conflict =
           appointment.date && appointment.time && mode !== "cancel"
@@ -1049,6 +1052,7 @@ export default function App() {
           <TodayView
             appointments={appointments}
             availability={availability}
+            locations={locations}
             onAdd={() => setSheet("actions")}
             onOpen={setVisit}
             backupDays={backupDays}
@@ -1130,7 +1134,7 @@ export default function App() {
           />
           <SheetAction
             title="Mi horario de trabajo"
-            hint="Bloques, cupos y locales"
+            hint="Cupos por día y jornada"
             onClick={() => {
               setSheet(null);
               setScheduleOpen(true);
@@ -1145,8 +1149,8 @@ export default function App() {
             Copiá el mensaje desde WhatsApp y pegalo acá. Podés pegar varios de una vez.
           </p>
           <p className="mb-3 rounded-xl bg-canvas px-3 py-2 text-[11px] text-muted">
-            La app lee el mensaje y propone la cita. Si menciona un local que todavía no
-            está creado, o si faltan el teléfono o el vehículo, <b>la cita se guarda
+            La app lee el mensaje y propone la cita. Si menciona una sede que todavía no
+            está creada, o si faltan el teléfono o el vehículo, <b>la cita se guarda
             igual</b> y el aviso queda en la cita y en el cierre del día para que el
             administrador lo complete.
           </p>
@@ -1191,7 +1195,6 @@ export default function App() {
       {scheduleOpen && (
         <ScheduleSheet
           technicianId={technician.id}
-          locations={locations}
           onClose={() => setScheduleOpen(false)}
           onChanged={() => void refresh()}
         />
@@ -1201,6 +1204,7 @@ export default function App() {
         <ClientSheet
           client={clientHistory}
           appointments={clientAppointments}
+          locations={locations}
           onClose={() => setClientHistory(null)}
           onOpen={(appointment) => {
             setClientHistory(null);
@@ -1212,6 +1216,7 @@ export default function App() {
       {historyOpen && (
         <HistorySheet
           appointments={historyAppointments}
+          locations={locations}
           onClose={() => setHistoryOpen(false)}
           onOpen={(appointment) => {
             setHistoryOpen(false);
@@ -1225,6 +1230,7 @@ export default function App() {
           date={dayView.date}
           appointments={dayView.appointments}
           availability={dayView.availability}
+          locations={locations}
           onClose={() => setDayView(null)}
           onOpen={(appointment) => {
             setDayView(null);
@@ -1395,6 +1401,7 @@ function Toast({ message, kind = "ok" }: { message: string | null; kind?: "ok" |
 function TodayView({
   appointments,
   availability,
+  locations,
   onAdd,
   onOpen,
   backupDays,
@@ -1402,13 +1409,18 @@ function TodayView({
 }: {
   appointments: Appointment[];
   availability: AvailabilityBlock[];
+  locations: Location[];
   onAdd: () => void;
   onOpen: (appointment: Appointment) => void;
   backupDays: number | null;
   onBackup: () => void;
 }) {
-  const morning = appointments.filter((item) => windowOf(item.type) === "morning");
-  const afternoon = appointments.filter((item) => windowOf(item.type) === "afternoon");
+  const morning = appointments.filter(
+    (item) => windowOfTime(item.time, item.type) === "morning"
+  );
+  const afternoon = appointments.filter(
+    (item) => windowOfTime(item.time, item.type) === "afternoon"
+  );
 
   return (
     <div className="space-y-6">
@@ -1454,9 +1466,7 @@ function TodayView({
                   {WINDOW_LABEL[window]}
                 </p>
                 <p className="mt-1 text-[11px]">
-                  {block
-                    ? `${block.occupied}/${block.capacity} · ${block.locationName}`
-                    : "Cerrado"}
+                  {block ? `${block.occupied}/${block.capacity} cupos` : "Cerrado"}
                 </p>
               </div>
             );
@@ -1475,17 +1485,19 @@ function TodayView({
       ) : (
         <>
           <AppointmentGroup
-            title="Jornada mañana · 8:00–12:00"
+            title="Jornada mañana · 8:00-12:00"
             window="morning"
             block={availability.find((item) => item.window === "morning")}
             items={morning}
+            locations={locations}
             onOpen={onOpen}
           />
           <AppointmentGroup
-            title="Jornada tarde · 13:00–18:00"
+            title="Jornada tarde · 13:00-18:00"
             window="afternoon"
             block={availability.find((item) => item.window === "afternoon")}
             items={afternoon}
+            locations={locations}
             onOpen={onOpen}
           />
         </>
@@ -1499,12 +1511,14 @@ function AppointmentGroup({
   window,
   block,
   items,
+  locations,
   onOpen,
 }: {
   title: string;
   window: "morning" | "afternoon";
   block?: AvailabilityBlock;
   items: Appointment[];
+  locations: Location[];
   onOpen: (appointment: Appointment) => void;
 }) {
   if (!items.length) return null;
@@ -1526,7 +1540,12 @@ function AppointmentGroup({
       </div>
       <div className="space-y-2">
         {items.map((appointment) => (
-          <AppointmentCard key={appointment.id} appointment={appointment} onOpen={onOpen} />
+          <AppointmentCard
+            key={appointment.id}
+            appointment={appointment}
+            locations={locations}
+            onOpen={onOpen}
+          />
         ))}
       </div>
     </section>
@@ -1535,13 +1554,16 @@ function AppointmentGroup({
 
 function AppointmentCard({
   appointment,
+  locations,
   onOpen,
 }: {
   appointment: Appointment;
+  locations: Location[];
   onOpen: (appointment: Appointment) => void;
 }) {
   const alerts = appointment.alerts ?? [];
   const visibleAlerts = alerts.slice(0, 2);
+  const place = locations.find((location) => location.id === appointment.locationId)?.name;
 
   return (
     <article
@@ -1571,6 +1593,13 @@ function AppointmentCard({
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
         <span className="rounded-md bg-canvas px-1.5 py-0.5 font-mono text-[10px]">
           #{appointment.id}
+        </span>
+        <span
+          className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+            place ? "bg-canvas text-ink" : "bg-warn-soft text-warn"
+          }`}
+        >
+          {place ?? "Sin sede"}
         </span>
         {appointment.type && <Label>{TYPE_LABEL[appointment.type]}</Label>}
         {appointment.amount !== null && (
@@ -1612,7 +1641,7 @@ function InboxView({
         <p className="text-xs font-semibold">Pendientes ({messages.length})</p>
         <p className="mt-1 text-[11px] text-muted">
           Solo caen aquí los mensajes que <b>no se pudieron agendar</b> porque falta el
-          nombre o la fecha. Si lo que falta es el teléfono, el local o el vehículo, la
+          nombre o la fecha. Si lo que falta es el teléfono, la sede o el vehículo, la
           cita se guarda igual con un aviso.
         </p>
         <p className="mt-1 text-[11px] text-muted">
@@ -1757,10 +1786,14 @@ function WeekView({
               </div>
               <span
                 className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                  day.free === 0 ? "bg-danger-soft text-danger" : "bg-brand-soft text-brand"
+                  day.closed
+                    ? "bg-canvas text-muted"
+                    : day.free === 0
+                      ? "bg-danger-soft text-danger"
+                      : "bg-brand-soft text-brand"
                 }`}
               >
-                {day.free === 0 ? "Lleno" : `${day.free} libres`}
+                {day.closed ? "Cerrado" : day.free === 0 ? "Lleno" : `${day.free} libres`}
               </span>
             </button>
           ))}
@@ -1998,7 +2031,7 @@ function DraftCard({
 
       {draft.capacityLabel && (
         <p className={`text-[10px] ${draft.capacityFull ? "text-danger" : "text-muted"}`}>
-          {WINDOW_LABEL[windowOf(draft.type)]}: {draft.capacityLabel}
+          {WINDOW_LABEL[windowOfTime(draft.time, draft.type)]}: {draft.capacityLabel}
           {draft.capacityFull ? " · completa" : ""}
         </p>
       )}
@@ -2022,27 +2055,32 @@ function DraftCard({
         </div>
       )}
 
-      <select
-        value={draft.locationId ?? ""}
-        onChange={(event) => onLocationChange(event.target.value || null)}
-        className="mt-2 w-full rounded-lg border border-line bg-surface px-2 py-2 text-xs"
-      >
-        <option value="">Sin local</option>
-        {locations.map((location) => (
-          <option key={location.id} value={location.id}>
-            {location.name}
-          </option>
-        ))}
-      </select>
+      <label className="mt-2 block">
+        <span className="text-[10px] font-semibold text-muted">Sede</span>
+        <select
+          value={draft.locationId ?? ""}
+          onChange={(event) => onLocationChange(event.target.value || null)}
+          className="mt-0.5 w-full rounded-lg border border-line bg-surface px-2 py-2 text-xs"
+        >
+          <option value="">Sin sede</option>
+          {locations
+            .filter((location) => location.active !== false || location.id === draft.locationId)
+            .map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.name}
+              </option>
+            ))}
+        </select>
+      </label>
 
       {draft.unknownLocation && !draft.locationId && (
         <div className="mt-2 rounded-lg border border-line bg-warn-soft p-2">
           <p className="text-[11px] font-semibold text-warn">
-            El local “{draft.unknownLocation}” no está registrado
+            La sede "{draft.unknownLocation}" no está registrada
           </p>
           <p className="mt-0.5 text-[10px] text-warn">
-            La cita se guarda igual, sin local. Pedile al administrador que lo cree en
-            Administración → Locales. El aviso queda en la cita y en el cierre del día.
+            La cita se guarda igual, sin sede. Pedile al administrador que la cree en
+            Administración → Sedes. El aviso queda en la cita y en el cierre del día.
           </p>
         </div>
       )}
@@ -2711,6 +2749,9 @@ function VisitSheet({
           <p className="text-xs text-muted">
             {[appointment.model, appointment.time].filter(Boolean).join(" · ")}
           </p>
+          <p className={`text-xs ${placeName ? "text-muted" : "text-warn"}`}>
+            Sede: {placeName || "Sin sede"}
+          </p>
           <p className="mt-1 font-mono text-[10px] text-muted">#{appointment.id}</p>
         </div>
 
@@ -3022,17 +3063,14 @@ function VisitSheet({
 
 function ScheduleSheet({
   technicianId,
-  locations,
   onClose,
   onChanged,
 }: {
   technicianId: string;
-  locations: Location[];
   onClose: () => void;
   onChanged: () => void;
 }) {
   const [blocks, setBlocks] = useState<ScheduleBlock[]>([]);
-  const names = new Map(locations.map((location) => [location.id, location.name]));
 
   const load = useCallback(async () => {
     setBlocks(await listSchedule(technicianId));
@@ -3060,8 +3098,8 @@ function ScheduleSheet({
   return (
     <Sheet title="Mi horario" onClose={onClose}>
       <p className="mb-3 text-xs text-muted">
-        El local de cada cita sale de este horario. Mañana: mantenimientos. Tarde: revisiones y
-        garantías.
+        Estos son los cupos generales del técnico. No dependen de la sede: la sede se
+        elige en cada cita.
       </p>
 
       <div className="max-h-[55vh] space-y-3 overflow-y-auto pr-1">
@@ -3089,10 +3127,7 @@ function ScheduleSheet({
                             block.active ? "" : "text-muted line-through"
                           }`}
                         >
-                          {WINDOW_LABEL[block.window]} · {block.from}–{block.to}
-                        </p>
-                        <p className="truncate text-[10px] text-muted">
-                          {names.get(block.locationId) ?? block.locationId}
+                          {WINDOW_LABEL[block.window]} · {block.from}-{block.to}
                         </p>
                       </div>
                       <div className="flex items-center gap-1">
@@ -3812,7 +3847,7 @@ function AdminView({
     if (!locationForm) return;
     const name = locationForm.name.trim();
     if (name.length < 2) {
-      setError("Escribí el nombre del local.");
+      setError("Escribí el nombre de la sede.");
       return;
     }
     const duplicate = locations.find(
@@ -3820,7 +3855,7 @@ function AdminView({
         location.id !== locationForm.id && location.name.trim().toLowerCase() === name.toLowerCase()
     );
     if (duplicate) {
-      setError("Ya existe un local con ese nombre.");
+      setError("Ya existe una sede con ese nombre.");
       return;
     }
 
@@ -3841,7 +3876,7 @@ function AdminView({
 
     setLocationForm(null);
     setError(null);
-    onToast(locationForm.id ? "Local actualizado" : "Local creado");
+    onToast(locationForm.id ? "Sede actualizada" : "Sede creada");
     await load();
   }
 
@@ -4132,7 +4167,7 @@ function AdminView({
         <section className="rounded-2xl border border-line bg-surface p-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold">Locales</p>
+              <p className="text-xs font-semibold">Sedes</p>
               <p className="text-[10px] text-muted">Nombre, ciudad y alias.</p>
             </div>
             <button
@@ -4443,7 +4478,7 @@ function AdminView({
 
       {locationForm && (
         <Sheet
-          title={locationForm.id ? "Editar local" : "Nuevo local"}
+          title={locationForm.id ? "Editar sede" : "Nueva sede"}
           onClose={() => setLocationForm(null)}
         >
           <div className="space-y-2">
@@ -4452,7 +4487,7 @@ function AdminView({
               onChange={(event) =>
                 setLocationForm({ ...locationForm, name: event.target.value })
               }
-              placeholder="Nombre del local"
+              placeholder="Nombre de la sede"
               className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
             />
             <input
@@ -4472,8 +4507,8 @@ function AdminView({
               className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand"
             />
             <p className="text-[10px] text-muted">
-              Los alias sirven para reconocer el local cuando el mensaje lo escribe distinto
-              (ej.: "Ofero centro").
+              Los alias sirven para reconocer la sede cuando el mensaje la escribe
+              distinto (ej.: "Ofero centro").
             </p>
           </div>
           <button
@@ -4510,6 +4545,9 @@ function AdminView({
                       <p className="truncate text-[10px] text-muted">
                         {technicians.find((item) => item.id === appointment.technicianId)?.name ??
                           appointment.technicianId}
+                        {" · "}
+                        {locations.find((item) => item.id === appointment.locationId)?.name ??
+                          "Sin sede"}
                       </p>
                     </div>
                     <Label tone={STATUS_TONE[appointment.status]} dot>
@@ -4756,10 +4794,12 @@ function dayBadge(iso: string | null): { day: string; month: string } {
 
 function AppointmentHistory({
   appointments,
+  locations,
   onOpen,
   searchable = false,
 }: {
   appointments: Appointment[];
+  locations: Location[];
   onOpen: (appointment: Appointment) => void;
   searchable?: boolean;
 }) {
@@ -4767,6 +4807,7 @@ function AppointmentHistory({
   const [when, setWhen] = useState<HistoryWhen>("all");
   const [statuses, setStatuses] = useState<AppointmentStatus[]>([]);
   const [types, setTypes] = useState<ServiceType[]>([]);
+  const [locationIds, setLocationIds] = useState<string[]>([]);
   const [range, setRange] = useState<HistoryRange>("any");
   const [order, setOrder] = useState<"desc" | "asc">("desc");
   const [onlyPhotos, setOnlyPhotos] = useState(false);
@@ -4790,6 +4831,12 @@ function AppointmentHistory({
   const base = appointments.filter((appointment) => {
     if (statuses.length && !statuses.includes(appointment.status)) return false;
     if (types.length && (!appointment.type || !types.includes(appointment.type))) return false;
+    if (
+      locationIds.length &&
+      (!appointment.locationId || !locationIds.includes(appointment.locationId))
+    ) {
+      return false;
+    }
     if (since && (!appointment.date || appointment.date < since)) return false;
     if (range === "year" && (!appointment.date || !appointment.date.startsWith(year))) return false;
     if (
@@ -4836,13 +4883,19 @@ function AppointmentHistory({
   const advanced =
     (range !== "any" ? 1 : 0) +
     (order !== "desc" ? 1 : 0) +
-    (onlyPhotos ? 1 : 0);
+    (onlyPhotos ? 1 : 0) +
+    (locationIds.length > 0 ? 1 : 0);
   const active =
-    advanced > 0 || statuses.length > 0 || types.length > 0 || Boolean(query.trim());
+    advanced > 0 ||
+    statuses.length > 0 ||
+    types.length > 0 ||
+    locationIds.length > 0 ||
+    Boolean(query.trim());
 
   function clearAll() {
     setStatuses([]);
     setTypes([]);
+    setLocationIds([]);
     setRange("any");
     setOrder("desc");
     setOnlyPhotos(false);
@@ -4953,6 +5006,9 @@ function AppointmentHistory({
               <div className="space-y-2">
                 {items.map((appointment) => {
                   const badge = dayBadge(appointment.date);
+                  const place = locations.find(
+                    (location) => location.id === appointment.locationId
+                  )?.name;
                   const alert = (appointment.alerts ?? []).find(
                     (item) => item.severity !== "low"
                   );
@@ -4997,6 +5053,9 @@ function AppointmentHistory({
                               .join(" · ")}
                           </p>
                           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted">
+                            <span className={place ? "font-semibold text-ink" : "font-semibold text-warn"}>
+                              {place ?? "Sin sede"}
+                            </span>
                             {appointment.amount !== null && (
                               <span className="font-semibold text-brand">
                                 {money(appointment.amount)}
@@ -5028,6 +5087,32 @@ function AppointmentHistory({
       {filtersOpen && (
         <Sheet title="Filtrar citas" onClose={() => setFiltersOpen(false)}>
           <div className="space-y-3">
+            {locations.length > 0 && (
+              <section>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                  Sede
+                </p>
+                <div className="mt-1 flex gap-1 overflow-x-auto pb-1">
+                  {locations.map((location) => (
+                    <button
+                      key={location.id}
+                      type="button"
+                      onClick={() =>
+                        setLocationIds((list) => toggle(list, location.id))
+                      }
+                      className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                        locationIds.includes(location.id)
+                          ? "bg-brand-solid text-white"
+                          : "border border-line bg-surface text-muted"
+                      }`}
+                    >
+                      {location.name}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section>
               <p className="text-[10px] font-bold uppercase tracking-wider text-muted">Fecha</p>
               <div className="mt-1 flex gap-1">
@@ -5114,11 +5199,13 @@ function AppointmentHistory({
 function ClientSheet({
   client,
   appointments,
+  locations,
   onClose,
   onOpen,
 }: {
   client: TechnicianClient;
   appointments: Appointment[];
+  locations: Location[];
   onClose: () => void;
   onOpen: (appointment: Appointment) => void;
 }) {
@@ -5156,17 +5243,19 @@ function ClientSheet({
         </div>
       </div>
 
-      <AppointmentHistory appointments={appointments} onOpen={onOpen} />
+      <AppointmentHistory appointments={appointments} locations={locations} onOpen={onOpen} />
     </Sheet>
   );
 }
 
 function HistorySheet({
   appointments,
+  locations,
   onClose,
   onOpen,
 }: {
   appointments: Appointment[];
+  locations: Location[];
   onClose: () => void;
   onOpen: (appointment: Appointment) => void;
 }) {
@@ -5175,7 +5264,12 @@ function HistorySheet({
       <p className="mb-2 text-[11px] text-muted">
         Todas las citas del técnico, incluidas las que ya pasaron y las canceladas.
       </p>
-      <AppointmentHistory appointments={appointments} onOpen={onOpen} searchable />
+      <AppointmentHistory
+        appointments={appointments}
+        locations={locations}
+        onOpen={onOpen}
+        searchable
+      />
     </Sheet>
   );
 }
@@ -5184,6 +5278,7 @@ function DaySheet({
   date,
   appointments,
   availability,
+  locations,
   onClose,
   onOpen,
   onAdd,
@@ -5191,12 +5286,17 @@ function DaySheet({
   date: string;
   appointments: Appointment[];
   availability: AvailabilityBlock[];
+  locations: Location[];
   onClose: () => void;
   onOpen: (appointment: Appointment) => void;
   onAdd: () => void;
 }) {
-  const morning = appointments.filter((item) => windowOf(item.type) === "morning");
-  const afternoon = appointments.filter((item) => windowOf(item.type) === "afternoon");
+  const morning = appointments.filter(
+    (item) => windowOfTime(item.time, item.type) === "morning"
+  );
+  const afternoon = appointments.filter(
+    (item) => windowOfTime(item.time, item.type) === "afternoon"
+  );
 
   return (
     <Sheet title={formatLong(date)} onClose={onClose}>
@@ -5245,6 +5345,7 @@ function DaySheet({
                       <AppointmentCard
                         key={appointment.id}
                         appointment={appointment}
+                        locations={locations}
                         onOpen={onOpen}
                       />
                     ))}
@@ -5286,7 +5387,9 @@ function ManualAppointmentSheet({
   const [date, setDate] = useState(todayIso());
   const [time, setTime] = useState("08:00");
   const [type, setType] = useState<ServiceType>("maintenance");
-  const [locationId, setLocationId] = useState<string | null>(null);
+  const [locationId, setLocationId] = useState<string | null>(
+    locations.find((location) => location.active !== false)?.id ?? null
+  );
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -5297,8 +5400,8 @@ function ManualAppointmentSheet({
   } | null>(null);
 
   useEffect(() => {
-    void capacityFor(date, type, technicianId).then(setCapacity);
-  }, [date, type, technicianId]);
+    void capacityFor(date, type, technicianId, time).then(setCapacity);
+  }, [date, type, time, technicianId]);
 
   async function save() {
     if (name.trim().length < 2) {
@@ -5414,7 +5517,7 @@ function ManualAppointmentSheet({
 
         {capacity && (
           <p className={`text-[11px] ${capacity.free <= 0 ? "text-danger" : "text-muted"}`}>
-            {WINDOW_LABEL[windowOf(type)]}: {capacity.occupied}/{capacity.capacity}
+            {WINDOW_LABEL[windowOfTime(time, type)]}: {capacity.occupied}/{capacity.capacity}
             {capacity.free <= 0 ? " · completa" : ` · quedan ${capacity.free}`}
           </p>
         )}
@@ -5430,18 +5533,23 @@ function ManualAppointmentSheet({
           <option value="part">Repuesto</option>
         </select>
 
-        <select
-          value={locationId ?? ""}
-          onChange={(event) => setLocationId(event.target.value || null)}
-          className="w-full rounded-lg border border-line bg-surface px-2 py-2 text-sm"
-        >
-          <option value="">Sin local</option>
-          {locations.map((location) => (
-            <option key={location.id} value={location.id}>
-              {location.name}
-            </option>
-          ))}
-        </select>
+        <label className="block">
+          <span className="text-[10px] font-semibold text-muted">Sede</span>
+          <select
+            value={locationId ?? ""}
+            onChange={(event) => setLocationId(event.target.value || null)}
+            className="mt-0.5 w-full rounded-lg border border-line bg-surface px-2 py-2 text-sm"
+          >
+            <option value="">Sin sede</option>
+            {locations
+              .filter((location) => location.active !== false || location.id === locationId)
+              .map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.name}
+                </option>
+              ))}
+          </select>
+        </label>
 
         <textarea
           value={notes}

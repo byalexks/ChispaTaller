@@ -94,6 +94,18 @@ export function windowOf(type: ServiceType | null): WindowKey {
   return type === "maintenance" ? "morning" : "afternoon";
 }
 
+/** The window is the hour's window; the service type is only a fallback. */
+export function windowOfTime(
+  time: string | null | undefined,
+  type: ServiceType | null
+): WindowKey {
+  if (time) {
+    const hour = Number(time.slice(0, 2));
+    if (Number.isFinite(hour)) return hour < 13 ? "morning" : "afternoon";
+  }
+  return windowOf(type);
+}
+
 /** One technician for now. Admin mode can add more. */
 const SEED_TECHNICIANS: Technician[] = [
   { id: "tech-1", name: "Técnico", pin: "1234", color: "#0f5132", active: true },
@@ -108,7 +120,7 @@ const SEED_LOCATIONS: Location[] = [
   { id: "turbaco", name: "Turbaco", city: "Turbaco", aliases: [] },
 ];
 
-/** Placeholder schedule: same shape for every technician until they configure theirs. */
+/** General slots per technician: they do not depend on the location. */
 function seedSchedule(technicianId: string): ScheduleBlock[] {
   const blocks: ScheduleBlock[] = [];
   for (let weekday = 1; weekday <= 5; weekday += 1) {
@@ -118,7 +130,6 @@ function seedSchedule(technicianId: string): ScheduleBlock[] {
       weekday,
       from: "08:00",
       to: "12:00",
-      locationId: "cartagena-1",
       window: "morning",
       capacity: 4,
       active: true,
@@ -129,7 +140,6 @@ function seedSchedule(technicianId: string): ScheduleBlock[] {
       weekday,
       from: "13:00",
       to: "18:00",
-      locationId: "cartagena-1",
       window: "afternoon",
       capacity: 3,
       active: true,
@@ -141,7 +151,6 @@ function seedSchedule(technicianId: string): ScheduleBlock[] {
     weekday: 6,
     from: "08:00",
     to: "12:00",
-    locationId: "turbaco",
     window: "morning",
     capacity: 4,
     active: true,
@@ -201,7 +210,60 @@ async function migrateWindows(db: AgendaDB): Promise<void> {
   await tx.done;
 }
 
-/** One-time move from a single photo per visit to a list of photo ids. */
+/**
+ * One-time move from capacity per location to general slots per technician.
+ * Merges legacy blocks for the same technician/weekday/window and seeds a
+ * default schedule for technicians that have none.
+ */
+async function migrateSchedule(db: AgendaDB): Promise<void> {
+  if (await db.get("settings", "schedule-general-v1")) return;
+
+  const blocks = await db.getAll("schedule");
+  const technicians = await db.getAll("technicians");
+  const merged = new Map<string, ScheduleBlock>();
+
+  for (const block of blocks) {
+    const key = `${block.technicianId}|${block.weekday}|${block.window}`;
+    const current = merged.get(key);
+    if (current) {
+      current.capacity = Math.min(20, current.capacity + block.capacity);
+      current.from = current.from < block.from ? current.from : block.from;
+      current.to = current.to > block.to ? current.to : block.to;
+      current.active = current.active || block.active;
+    } else {
+      merged.set(key, {
+        id: `${block.technicianId}-w${block.weekday}-${block.window}`,
+        technicianId: block.technicianId,
+        weekday: block.weekday,
+        from: block.from,
+        to: block.to,
+        window: block.window,
+        capacity: block.capacity,
+        active: block.active,
+      });
+    }
+  }
+
+  for (const technician of technicians) {
+    const hasBlocks = [...merged.values()].some(
+      (block) => block.technicianId === technician.id
+    );
+    if (!hasBlocks) {
+      for (const block of seedSchedule(technician.id)) {
+        merged.set(block.id, block);
+      }
+    }
+  }
+
+  const tx = db.transaction(["schedule", "settings"], "readwrite");
+  await tx.objectStore("schedule").clear();
+  for (const block of merged.values()) {
+    await tx.objectStore("schedule").put(block);
+  }
+  await tx.objectStore("settings").put("1", "schedule-general-v1");
+  await tx.done;
+}
+
 async function migratePhotos(db: AgendaDB): Promise<void> {
   if (await db.get("settings", "photos-v2")) return;
 
@@ -291,6 +353,7 @@ export function getDb(): Promise<AgendaDB> {
     }).then(async (db) => {
       await seedIfEmpty(db);
       await migrateWindows(db);
+      await migrateSchedule(db);
       await migratePhotos(db);
       return db;
     });
@@ -490,18 +553,19 @@ export async function resolveLocationText(text: string | null): Promise<string |
 }
 
 export async function suggestLocationId(
-  date: string,
-  type: ServiceType | null,
+  _date: string,
+  _type: ServiceType | null,
   technicianId: string
 ): Promise<string | null> {
   const db = await getDb();
-  const weekday = weekdayOf(date);
-  const blocks = await db.getAllFromIndex("schedule", "byTechnician", technicianId);
-  const window = windowOf(type);
-  const block = blocks
-    .filter((item) => item.active && item.weekday === weekday && item.window === window)
-    .sort((a, b) => a.from.localeCompare(b.from))[0];
-  return block?.locationId ?? null;
+  const locations = await listLocations(false);
+  const valid = new Set(locations.map((location) => location.id));
+  const appointments = await db.getAllFromIndex("appointments", "byTechnician", technicianId);
+  const recent = appointments
+    .filter((appointment) => appointment.locationId && valid.has(appointment.locationId))
+    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+
+  return recent[0]?.locationId ?? locations[0]?.id ?? null;
 }
 
 /** Sequential, readable id: C-0001, C-000A, C-000B… */
@@ -1287,20 +1351,16 @@ export async function availabilityForDay(
   const appointments = (await db.getAllFromIndex("appointments", "byDate", date)).filter(
     (appointment) => appointment.technicianId === technicianId
   );
-  const locations = await db.getAll("locations");
-  const names = new Map(locations.map((location) => [location.id, location.name]));
 
   return blocks.map((block) => {
     const occupied = appointments.filter(
       (appointment) =>
-        appointment.locationId === block.locationId &&
         OCCUPYING.has(appointment.status) &&
-        windowOf(appointment.type) === block.window
+        windowOfTime(appointment.time, appointment.type) === block.window
     ).length;
     const free = Math.max(0, block.capacity - occupied);
     return {
       ...block,
-      locationName: names.get(block.locationId) ?? block.locationId,
       occupied,
       free,
       state: free === 0 ? "full" : free === 1 ? "last" : "available",
@@ -1311,44 +1371,40 @@ export async function availabilityForDay(
 export async function capacityFor(
   date: string,
   type: ServiceType | null,
-  technicianId: string
+  technicianId: string,
+  time?: string | null
 ): Promise<{
   occupied: number;
   capacity: number;
   free: number;
-  local: string;
   window: WindowKey;
 } | null> {
   const availability = await availabilityForDay(date, technicianId);
-  const block = availability.find((item) => item.window === windowOf(type));
+  const block = availability.find(
+    (item) => item.window === windowOfTime(time, type)
+  );
   if (!block) return null;
   return {
     occupied: block.occupied,
     capacity: block.capacity,
     free: block.free,
-    local: block.locationName,
     window: block.window,
   };
 }
 
 export async function nextAvailableDate(
   fromDate: string,
-  type: ServiceType | null,
+  _type: ServiceType | null,
   technicianId: string,
   maxDays = 14
 ): Promise<string | null> {
   for (let offset = 0; offset < maxDays; offset += 1) {
     const date = isoWithOffset(fromDate, offset);
-    const capacity = await capacityFor(date, type, technicianId);
-    if (capacity && capacity.free > 0) return date;
+    const availability = await availabilityForDay(date, technicianId);
+    if (availability.some((block) => block.free > 0)) return date;
   }
   return null;
 }
-
-const WINDOW_HOURS: Record<WindowKey, { from: number; to: number }> = {
-  morning: { from: 8, to: 12 },
-  afternoon: { from: 13, to: 18 },
-};
 
 function toMinutes(time: string): number {
   const [hours, minutes] = time.split(":").map(Number);
@@ -1376,23 +1432,26 @@ export async function timeConflict(
   return null;
 }
 
-/** First free date and hour for a service, scanning two weeks. */
+/** First free date and hour, scanning both windows and two weeks. */
 export async function nextFreeSlot(
   fromDate: string,
-  type: ServiceType | null,
+  _type: ServiceType | null,
   technicianId: string,
   maxDays = 14
 ): Promise<{ date: string; time: string } | null> {
-  const hours = WINDOW_HOURS[windowOf(type)];
-
   for (let offset = 0; offset < maxDays; offset += 1) {
     const date = isoWithOffset(fromDate, offset);
-    const capacity = await capacityFor(date, type, technicianId);
-    if (!capacity || capacity.free <= 0) continue;
+    const availability = await availabilityForDay(date, technicianId);
 
-    for (let hour = hours.from; hour < hours.to; hour += 1) {
-      const time = `${String(hour).padStart(2, "0")}:00`;
-      if (!(await timeConflict(date, time, technicianId))) return { date, time };
+    for (const block of availability) {
+      if (block.free <= 0) continue;
+
+      const from = toMinutes(block.from);
+      const to = toMinutes(block.to);
+      for (let minute = from; minute < to; minute += 60) {
+        const time = `${pad(Math.floor(minute / 60))}:${pad(minute % 60)}`;
+        if (!(await timeConflict(date, time, technicianId))) return { date, time };
+      }
     }
   }
   return null;
@@ -1425,6 +1484,7 @@ export async function weekOverview(
       date,
       appointments: appointments.filter((item) => OCCUPYING.has(item.status)).length,
       free: availability.reduce((total, block) => total + block.free, 0),
+      closed: availability.length === 0,
     });
   }
 
