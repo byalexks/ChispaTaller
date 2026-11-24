@@ -7,6 +7,7 @@ import {
   availabilityForDay,
   capacityFor,
   clearTechnicianData,
+  clientPhonesForName,
   clientsOfTechnician,
   closeAppointment,
   countAppointments,
@@ -62,6 +63,7 @@ import {
 import { downloadCsv, downloadJson, downloadBlob, safeFileName } from "./export";
 import { buildDaily, buildRange, uploadDaily } from "./daily";
 import { pullConfig, pushConfig } from "./configSync";
+import { DEFAULT_SCRIPT_TOKEN, DEFAULT_SCRIPT_URL, hasRemoteDefaults } from "./remote";
 import { zipSync } from "fflate";
 import { attemptsLeft, clearFailures, lockRemaining, registerFailure } from "./auth";
 import type {
@@ -349,31 +351,6 @@ export default function App() {
     }
   }
 
-  function linkingCode(): string {
-    if (!uploadUrl.trim() || !uploadToken.trim()) return "";
-    try {
-      return btoa(JSON.stringify({ u: uploadUrl.trim(), t: uploadToken.trim() }));
-    } catch {
-      return "";
-    }
-  }
-
-  async function applyLinkCode(code: string) {
-    try {
-      const parsed = JSON.parse(atob(code.trim())) as { u?: string; t?: string };
-      if (!parsed.u || !parsed.t) throw new Error("inválido");
-
-      await setSetting("uploadUrl", parsed.u);
-      await setSetting("uploadToken", parsed.t);
-      setUploadUrl(parsed.u);
-      setUploadToken(parsed.t);
-      await pullSharedConfig();
-      showToast("Equipo vinculado");
-    } catch {
-      showToast("Código inválido", "error");
-    }
-  }
-
   async function pushSharedConfig(notify = false) {
     try {
       const [url, token] = await Promise.all([
@@ -474,10 +451,23 @@ export default function App() {
 
   async function pullSharedConfig() {
     try {
-      const [url, token] = await Promise.all([
+      const [storedUrl, storedToken] = await Promise.all([
         getSetting("uploadUrl"),
         getSetting("uploadToken"),
       ]);
+
+      let url = storedUrl ?? "";
+      let token = storedToken ?? "";
+
+      if ((!url || !token) && hasRemoteDefaults()) {
+        url = url || DEFAULT_SCRIPT_URL;
+        token = token || DEFAULT_SCRIPT_TOKEN;
+        await setSetting("uploadUrl", url);
+        await setSetting("uploadToken", token);
+        setUploadUrl(url);
+        setUploadToken(token);
+      }
+
       if (!url || !token) return;
 
       const shared = await pullConfig(url, token);
@@ -821,6 +811,8 @@ export default function App() {
       results.map(async (result) => {
         const appointment = result.appointment;
         const fromText = await resolveLocationText(appointment.location);
+        const mentionedLocation = appointment.location?.trim() || null;
+        const unknownLocation = mentionedLocation && !fromText ? mentionedLocation : null;
         const suggested = appointment.date
           ? await suggestLocationId(appointment.date, appointment.type, technician.id)
           : null;
@@ -851,10 +843,45 @@ export default function App() {
             ? await nextFreeSlot(appointment.date, appointment.type, technician.id)
             : null;
 
+        const extraAlerts: Alert[] = [];
+
+        if (!appointment.phone && appointment.name) {
+          const storedPhones = await clientPhonesForName(appointment.name);
+          if (storedPhones.length === 0) {
+            extraAlerts.push({
+              code: "MISSING_PHONE",
+              field: "phone",
+              severity: "medium",
+              message:
+                "Cliente sin teléfono registrado: no se podrá llamar ni confirmar por WhatsApp. Pedile al administrador que lo agregue.",
+            });
+          }
+        }
+
+        if (unknownLocation) {
+          extraAlerts.push({
+            code: "UNKNOWN_LOCATION",
+            field: "location",
+            severity: "medium",
+            message: `El local "${unknownLocation}" no está registrado. La cita se guarda sin local: pedile al administrador que lo cree en Administración → Locales.`,
+          });
+        }
+
+        if (!appointment.model) {
+          extraAlerts.push({
+            code: "MISSING_VEHICLE",
+            field: "model",
+            severity: "low",
+            message:
+              "Sin vehículo o modelo: completalo para que el historial del cliente quede claro.",
+          });
+        }
+
         return {
           ...appointment,
-          alerts: result.alerts,
-          locationId: fromText ?? suggested,
+          alerts: [...result.alerts, ...extraAlerts],
+          locationId: fromText ?? (unknownLocation ? null : suggested),
+          unknownLocation,
           mode,
           matchId: match?.id ?? null,
           matchLabel: match
@@ -888,6 +915,10 @@ export default function App() {
       const parts = [`${result.saved} cita${result.saved === 1 ? "" : "s"} guardada${result.saved === 1 ? "" : "s"}`];
       if (result.inbox) parts.push(`${result.inbox} a bandeja`);
       if (otherDays) parts.push(`${otherDays} para otro día`);
+      const noticeCount = drafts.filter((draft) =>
+        (draft.alerts ?? []).some((alert) => alert.severity !== "low")
+      ).length;
+      if (noticeCount) parts.push(`${noticeCount} con avisos`);
       setToast(parts.join(" · "));
     } finally {
       setBusy(false);
@@ -922,8 +953,6 @@ export default function App() {
           onToast={setToast}
           onConfigChanged={() => void pushSharedConfig()}
           onSyncConfig={() => void pushSharedConfig(true)}
-          linkCode={linkingCode()}
-          onApplyLinkCode={(code) => void applyLinkCode(code)}
           onClose={() => {
             setAdminUnlocked(false);
             void listTechnicians().then(setTechnicians);
@@ -1076,6 +1105,12 @@ export default function App() {
           <p className="mb-3 text-sm text-muted">
             Copiá el mensaje desde WhatsApp y pegalo acá. Podés pegar varios de una vez.
           </p>
+          <p className="mb-3 rounded-xl bg-canvas px-3 py-2 text-[11px] text-muted">
+            La app lee el mensaje y propone la cita. Si menciona un local que todavía no
+            está creado, o si faltan el teléfono o el vehículo, <b>la cita se guarda
+            igual</b> y el aviso queda en la cita y en el cierre del día para que el
+            administrador lo complete.
+          </p>
           <textarea
             value={text}
             onChange={(event) => setText(event.target.value)}
@@ -1225,7 +1260,6 @@ export default function App() {
           uploading={autoUploading}
           onManualUpload={() => void manualUpload()}
           onTestUpload={() => void testUpload()}
-          onApplyLinkCode={(code) => void applyLinkCode(code)}
           onSaveUpload={(url, token, auto) => {
             setUploadUrl(url);
             setUploadToken(token);
@@ -1456,7 +1490,7 @@ function AppointmentCard({
   onOpen: (appointment: Appointment) => void;
 }) {
   const alerts = appointment.alerts ?? [];
-  const critical = alerts.find((item) => item.severity !== "low");
+  const visibleAlerts = alerts.slice(0, 2);
 
   return (
     <article
@@ -1494,11 +1528,18 @@ function AppointmentCard({
         {appointment.phone && <span>{appointment.phone}</span>}
       </div>
 
-      {critical && (
-        <p className="mt-2 rounded-lg bg-warn-soft px-2 py-1.5 text-[11px] font-medium text-warn">
-          {critical.message}
+      {visibleAlerts.map((alert) => (
+        <p
+          key={`${alert.code}-${alert.field}`}
+          className={`mt-2 line-clamp-2 rounded-lg px-2 py-1.5 text-[11px] font-medium ${
+            alert.severity === "low"
+              ? "bg-canvas text-muted"
+              : "bg-warn-soft text-warn"
+          }`}
+        >
+          {alert.message}
         </p>
-      )}
+      ))}
     </article>
   );
 }
@@ -1768,7 +1809,18 @@ function ReviewSheet({
   onConfirm: () => void;
 }) {
   function update(index: number, patch: Partial<ReviewDraft>) {
-    onChange(drafts.map((draft, position) => (position === index ? { ...draft, ...patch } : draft)));
+    onChange(
+      drafts.map((draft, position) => {
+        if (position !== index) return draft;
+        const next = { ...draft, ...patch };
+        if (patch.locationId) {
+          next.alerts = (next.alerts ?? []).filter(
+            (alert) => alert.code !== "UNKNOWN_LOCATION"
+          );
+        }
+        return next;
+      })
+    );
   }
 
   return (
@@ -1839,7 +1891,9 @@ function DraftCard({
   onMode: (mode: DraftMode) => void;
   onUseSuggestion: (suggestion: { date: string; time: string }) => void;
 }) {
-  const alerts: Alert[] = draft.alerts ?? [];
+  const alerts: Alert[] = (draft.alerts ?? []).filter(
+    (alert) => alert.code !== "UNKNOWN_LOCATION"
+  );
   const goesToInbox = !draft.name || !draft.date;
 
   const modeOptions: { key: DraftMode; label: string }[] = [
@@ -1910,6 +1964,18 @@ function DraftCard({
           </option>
         ))}
       </select>
+
+      {draft.unknownLocation && !draft.locationId && (
+        <div className="mt-2 rounded-lg border border-line bg-warn-soft p-2">
+          <p className="text-[11px] font-semibold text-warn">
+            El local “{draft.unknownLocation}” no está registrado
+          </p>
+          <p className="mt-0.5 text-[10px] text-warn">
+            La cita se guarda igual, sin local. Pedile al administrador que lo cree en
+            Administración → Locales. El aviso queda en la cita y en el cierre del día.
+          </p>
+        </div>
+      )}
 
       {draft.matchId && (
         <div className="mt-2 rounded-lg border border-line bg-surface p-2">
@@ -2578,6 +2644,24 @@ function VisitSheet({
           <p className="mt-1 font-mono text-[10px] text-muted">#{appointment.id}</p>
         </div>
 
+        {(appointment.alerts ?? []).length > 0 && (
+          <div className="rounded-2xl border border-line bg-surface p-3">
+            <p className="text-xs font-semibold">Avisos de esta cita</p>
+            <ul className="mt-1 space-y-1">
+              {(appointment.alerts ?? []).map((alert) => (
+                <li
+                  key={`${alert.code}-${alert.field}`}
+                  className={`rounded-lg px-2 py-1 text-[11px] ${
+                    alert.severity === "low" ? "bg-canvas text-muted" : "bg-warn-soft text-warn"
+                  }`}
+                >
+                  {alert.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {(() => {
           const phone = appointment.phone ?? clientPhone;
           const enabled = Boolean(phone);
@@ -3006,7 +3090,6 @@ function ProfileSheet({
   uploading,
   onManualUpload,
   onTestUpload,
-  onApplyLinkCode,
   onToast,
   onClose,
   onSaved,
@@ -3028,7 +3111,6 @@ function ProfileSheet({
   uploading: boolean;
   onManualUpload: () => void;
   onTestUpload: () => void;
-  onApplyLinkCode: (code: string) => void;
   onToast: (message: string) => void;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
@@ -3044,7 +3126,6 @@ function ProfileSheet({
   const [pendingImport, setPendingImport] = useState<File | null>(null);
   const [clientId, setClientId] = useState("");
   const [uploadForm, setUploadForm] = useState({ url: "", token: "", auto: false });
-  const [linkInput, setLinkInput] = useState("");
 
   useEffect(() => {
     setUploadForm({ url: uploadUrl, token: uploadToken, auto: autoUpload });
@@ -3329,33 +3410,6 @@ function ProfileSheet({
           </div>
         </div>
 
-        <div className="rounded-xl border border-line bg-surface p-3">
-          <p className="text-xs font-semibold">Vincular este equipo</p>
-          <p className="text-[10px] text-muted">
-            Pegá el código que te dio el administrador. Configura la conexión de una vez.
-          </p>
-          <div className="mt-2 flex gap-1">
-            <input
-              value={linkInput}
-              onChange={(event) => setLinkInput(event.target.value)}
-              placeholder="Código"
-              aria-label="Código de vinculación"
-              className="min-w-0 flex-1 rounded-lg border border-line bg-canvas px-2 py-2 text-[10px] outline-none focus:border-brand"
-            />
-            <button
-              type="button"
-              disabled={!linkInput.trim()}
-              onClick={() => {
-                onApplyLinkCode(linkInput);
-                setLinkInput("");
-              }}
-              className="h-9 shrink-0 rounded-lg border border-line px-3 text-[11px] font-semibold text-brand disabled:opacity-40"
-            >
-              Vincular
-            </button>
-          </div>
-        </div>
-
         {error && <p className="rounded-lg bg-danger-soft px-2 py-1.5 text-xs text-danger">{error}</p>}
 
         <button
@@ -3401,15 +3455,11 @@ function AdminView({
   onToast,
   onConfigChanged,
   onSyncConfig,
-  linkCode,
-  onApplyLinkCode,
 }: {
   onClose: () => void;
   onToast: (message: string) => void;
   onConfigChanged: () => void;
   onSyncConfig: () => void;
-  linkCode: string;
-  onApplyLinkCode: (code: string) => void;
 }) {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [name, setName] = useState("");
@@ -3442,7 +3492,6 @@ function AdminView({
   const [uploadToken, setUploadToken] = useState("");
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [linkInput, setLinkInput] = useState("");
   const [adminPin, setAdminPinValue] = useState("");
   const [adminCurrent, setAdminCurrent] = useState("");
   const [adminNew, setAdminNew] = useState("");
@@ -3961,54 +4010,6 @@ function AdminView({
             Sincronizar configuración (PINs)
           </button>
           {uploadStatus && <p className="mt-1 text-[10px] text-brand">{uploadStatus}</p>}
-        </section>
-
-        <section className="rounded-2xl border border-line bg-surface p-3">
-          <p className="text-xs font-semibold">Vincular equipos</p>
-          <p className="text-[10px] text-muted">
-            Copiá este código y pegalo en el equipo del técnico. Le deja la misma URL,
-            token y configuración.
-          </p>
-          <div className="mt-2 flex gap-1">
-            <input
-              readOnly
-              value={linkCode}
-              placeholder="Primero guardá URL y token"
-              aria-label="Código de vinculación"
-              className="min-w-0 flex-1 rounded-lg border border-line bg-canvas px-2 py-2 text-[10px] outline-none"
-            />
-            <button
-              type="button"
-              disabled={!linkCode}
-              onClick={() => {
-                void navigator.clipboard.writeText(linkCode);
-                onToast("Código copiado");
-              }}
-              className="h-9 shrink-0 rounded-lg border border-line px-3 text-[11px] font-semibold text-brand disabled:opacity-40"
-            >
-              Copiar
-            </button>
-          </div>
-          <div className="mt-1 flex gap-1">
-            <input
-              value={linkInput}
-              onChange={(event) => setLinkInput(event.target.value)}
-              placeholder="Pegar código"
-              aria-label="Pegar código de vinculación"
-              className="min-w-0 flex-1 rounded-lg border border-line bg-canvas px-2 py-2 text-[10px] outline-none focus:border-brand"
-            />
-            <button
-              type="button"
-              disabled={!linkInput.trim()}
-              onClick={() => {
-                onApplyLinkCode(linkInput);
-                setLinkInput("");
-              }}
-              className="h-9 shrink-0 rounded-lg border border-line px-3 text-[11px] font-semibold text-muted disabled:opacity-40"
-            >
-              Vincular
-            </button>
-          </div>
         </section>
 
         <section className="rounded-2xl border border-line bg-surface p-3">

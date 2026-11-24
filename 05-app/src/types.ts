@@ -61,6 +61,8 @@ export interface ParseResult {
 /** Draft with the location chosen in the review step. */
 export interface ReviewDraft extends Draft {
   locationId: string | null;
+  /** Local mentioned in the message that is not registered yet. */
+  unknownLocation: string | null;
   mode: DraftMode;
   matchId: string | null;
   matchLabel: string | null;

@@ -44,6 +44,9 @@ export async function buildDaily(date: string): Promise<DailyPayload> {
 
   for (const appointment of appointments) {
     const photos = await photosForAppointment(appointment.id);
+    const notices = (appointment.alerts ?? [])
+      .filter((alert) => alert.severity !== "low")
+      .map((alert) => alert.message);
     rows.push({
       id: appointment.id,
       fecha: appointment.date ?? date,
@@ -56,7 +59,12 @@ export async function buildDaily(date: string): Promise<DailyPayload> {
       tipo: appointment.type ?? "",
       estado: appointment.status,
       monto: appointment.amount,
-      observaciones: appointment.notes ?? "",
+      observaciones: [
+        appointment.notes ?? "",
+        notices.length ? `Avisos: ${notices.join(" | ")}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | "),
       fotos: photos.length,
     });
   }

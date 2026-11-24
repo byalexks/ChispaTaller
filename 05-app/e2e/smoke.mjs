@@ -33,6 +33,15 @@ const isoOffset = (days) => {
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
 
+// Keep tests hermetic: never pull the real shared config from Google.
+await page.route("https://script.google.com/**", (route) =>
+  route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ ok: true, cipher: "" }),
+  })
+);
+
 const problems = [];
 page.on("console", (message) => {
   if (message.type() === "error") problems.push(message.text());
@@ -299,6 +308,37 @@ Problema: se reprograma porque la clienta viaja.`;
     await page.getByText("Marta Ospina", { exact: true }).first().click();
     await page.getByText("Reprogramada", { exact: true }).first().waitFor();
     await page.getByRole("button", { name: "Cerrar", exact: true }).click();
+  });
+
+  await step("local no registrado: guarda la cita con el aviso", async () => {
+    await page.getByRole("button", { name: "Hoy", exact: true }).click();
+    await page.getByRole("button", { name: "Agregar" }).click();
+    await page.getByText("Pegar mensaje de WhatsApp", { exact: false }).click();
+
+    const target = new Date();
+    target.setDate(target.getDate() + 8);
+    while ([0, 6].includes(target.getDay())) target.setDate(target.getDate() + 1);
+    const readable = target.toLocaleDateString("es-CO", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+
+    const text = `PROGRAMACION DE MANTENIMIENTO
+
+Nombre y Apellidos:
+Cliente Sin Local
+Vehículo: galaxy 3
+Día y Hora: ${readable} 10:00am
+Local: Bocagrande
+Teléfono: 3005556677.`;
+
+    await page.locator("textarea").first().fill(text);
+    await page.getByRole("button", { name: "Procesar" }).click();
+    await page.getByText(/no está registrado/i).first().waitFor();
+    await page.getByRole("button", { name: "Confirmar", exact: true }).click();
+    await pause(900);
+    await page.getByText(/con avisos/i).first().waitFor();
   });
 
   await step("cambiar a modo oscuro", async () => {

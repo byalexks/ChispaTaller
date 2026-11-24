@@ -434,6 +434,13 @@ export async function getClient(id: string): Promise<Client | undefined> {
   return db.get("clients", id);
 }
 
+/** Phones already stored for a client with that name (any capitalization). */
+export async function clientPhonesForName(name: string): Promise<string[]> {
+  const db = await getDb();
+  const found = await db.getAllFromIndex("clients", "byName", normalize(name));
+  return found.flatMap((client) => client.phones);
+}
+
 export async function listLocations(includeInactive = true): Promise<Location[]> {
   const db = await getDb();
   const items = await db.getAll("locations");
@@ -716,7 +723,7 @@ export async function saveDrafts(
       const found = locations.find((item) => locationMatches(item, draft.location as string));
       locationId = found?.id ?? null;
     }
-    if (!locationId) {
+    if (!locationId && !draft.location) {
       locationId = await suggestLocationId(draft.date, draft.type, technicianId);
     }
 
