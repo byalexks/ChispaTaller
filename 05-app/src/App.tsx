@@ -349,6 +349,31 @@ export default function App() {
     }
   }
 
+  function linkingCode(): string {
+    if (!uploadUrl.trim() || !uploadToken.trim()) return "";
+    try {
+      return btoa(JSON.stringify({ u: uploadUrl.trim(), t: uploadToken.trim() }));
+    } catch {
+      return "";
+    }
+  }
+
+  async function applyLinkCode(code: string) {
+    try {
+      const parsed = JSON.parse(atob(code.trim())) as { u?: string; t?: string };
+      if (!parsed.u || !parsed.t) throw new Error("inválido");
+
+      await setSetting("uploadUrl", parsed.u);
+      await setSetting("uploadToken", parsed.t);
+      setUploadUrl(parsed.u);
+      setUploadToken(parsed.t);
+      await pullSharedConfig();
+      showToast("Equipo vinculado");
+    } catch {
+      showToast("Código inválido", "error");
+    }
+  }
+
   async function pushSharedConfig(notify = false) {
     try {
       const [url, token] = await Promise.all([
@@ -369,6 +394,8 @@ export default function App() {
         adminPin,
         adminHint: adminHint ?? "",
         technicians: list,
+        uploadUrl: url,
+        uploadToken: token,
       });
       if (notify) showToast("Configuración compartida actualizada");
     } catch (error) {
@@ -467,6 +494,14 @@ export default function App() {
 
       await setAdminPin(shared.adminPin);
       await setSetting("adminHint", shared.adminHint ?? "");
+      if (shared.uploadUrl) {
+        await setSetting("uploadUrl", shared.uploadUrl);
+        setUploadUrl(shared.uploadUrl);
+      }
+      if (shared.uploadToken) {
+        await setSetting("uploadToken", shared.uploadToken);
+        setUploadToken(shared.uploadToken);
+      }
       setTechnicians(await listTechnicians());
       if (technician) {
         const fresh = await getTechnician(technician.id);
@@ -887,6 +922,8 @@ export default function App() {
           onToast={setToast}
           onConfigChanged={() => void pushSharedConfig()}
           onSyncConfig={() => void pushSharedConfig(true)}
+          linkCode={linkingCode()}
+          onApplyLinkCode={(code) => void applyLinkCode(code)}
           onClose={() => {
             setAdminUnlocked(false);
             void listTechnicians().then(setTechnicians);
@@ -1188,6 +1225,7 @@ export default function App() {
           uploading={autoUploading}
           onManualUpload={() => void manualUpload()}
           onTestUpload={() => void testUpload()}
+          onApplyLinkCode={(code) => void applyLinkCode(code)}
           onSaveUpload={(url, token, auto) => {
             setUploadUrl(url);
             setUploadToken(token);
@@ -2968,6 +3006,7 @@ function ProfileSheet({
   uploading,
   onManualUpload,
   onTestUpload,
+  onApplyLinkCode,
   onToast,
   onClose,
   onSaved,
@@ -2989,6 +3028,7 @@ function ProfileSheet({
   uploading: boolean;
   onManualUpload: () => void;
   onTestUpload: () => void;
+  onApplyLinkCode: (code: string) => void;
   onToast: (message: string) => void;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
@@ -3004,6 +3044,7 @@ function ProfileSheet({
   const [pendingImport, setPendingImport] = useState<File | null>(null);
   const [clientId, setClientId] = useState("");
   const [uploadForm, setUploadForm] = useState({ url: "", token: "", auto: false });
+  const [linkInput, setLinkInput] = useState("");
 
   useEffect(() => {
     setUploadForm({ url: uploadUrl, token: uploadToken, auto: autoUpload });
@@ -3288,6 +3329,33 @@ function ProfileSheet({
           </div>
         </div>
 
+        <div className="rounded-xl border border-line bg-surface p-3">
+          <p className="text-xs font-semibold">Vincular este equipo</p>
+          <p className="text-[10px] text-muted">
+            Pegá el código que te dio el administrador. Configura la conexión de una vez.
+          </p>
+          <div className="mt-2 flex gap-1">
+            <input
+              value={linkInput}
+              onChange={(event) => setLinkInput(event.target.value)}
+              placeholder="Código"
+              aria-label="Código de vinculación"
+              className="min-w-0 flex-1 rounded-lg border border-line bg-canvas px-2 py-2 text-[10px] outline-none focus:border-brand"
+            />
+            <button
+              type="button"
+              disabled={!linkInput.trim()}
+              onClick={() => {
+                onApplyLinkCode(linkInput);
+                setLinkInput("");
+              }}
+              className="h-9 shrink-0 rounded-lg border border-line px-3 text-[11px] font-semibold text-brand disabled:opacity-40"
+            >
+              Vincular
+            </button>
+          </div>
+        </div>
+
         {error && <p className="rounded-lg bg-danger-soft px-2 py-1.5 text-xs text-danger">{error}</p>}
 
         <button
@@ -3333,11 +3401,15 @@ function AdminView({
   onToast,
   onConfigChanged,
   onSyncConfig,
+  linkCode,
+  onApplyLinkCode,
 }: {
   onClose: () => void;
   onToast: (message: string) => void;
   onConfigChanged: () => void;
   onSyncConfig: () => void;
+  linkCode: string;
+  onApplyLinkCode: (code: string) => void;
 }) {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [name, setName] = useState("");
@@ -3370,6 +3442,7 @@ function AdminView({
   const [uploadToken, setUploadToken] = useState("");
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [linkInput, setLinkInput] = useState("");
   const [adminPin, setAdminPinValue] = useState("");
   const [adminCurrent, setAdminCurrent] = useState("");
   const [adminNew, setAdminNew] = useState("");
@@ -3888,6 +3961,54 @@ function AdminView({
             Sincronizar configuración (PINs)
           </button>
           {uploadStatus && <p className="mt-1 text-[10px] text-brand">{uploadStatus}</p>}
+        </section>
+
+        <section className="rounded-2xl border border-line bg-surface p-3">
+          <p className="text-xs font-semibold">Vincular equipos</p>
+          <p className="text-[10px] text-muted">
+            Copiá este código y pegalo en el equipo del técnico. Le deja la misma URL,
+            token y configuración.
+          </p>
+          <div className="mt-2 flex gap-1">
+            <input
+              readOnly
+              value={linkCode}
+              placeholder="Primero guardá URL y token"
+              aria-label="Código de vinculación"
+              className="min-w-0 flex-1 rounded-lg border border-line bg-canvas px-2 py-2 text-[10px] outline-none"
+            />
+            <button
+              type="button"
+              disabled={!linkCode}
+              onClick={() => {
+                void navigator.clipboard.writeText(linkCode);
+                onToast("Código copiado");
+              }}
+              className="h-9 shrink-0 rounded-lg border border-line px-3 text-[11px] font-semibold text-brand disabled:opacity-40"
+            >
+              Copiar
+            </button>
+          </div>
+          <div className="mt-1 flex gap-1">
+            <input
+              value={linkInput}
+              onChange={(event) => setLinkInput(event.target.value)}
+              placeholder="Pegar código"
+              aria-label="Pegar código de vinculación"
+              className="min-w-0 flex-1 rounded-lg border border-line bg-canvas px-2 py-2 text-[10px] outline-none focus:border-brand"
+            />
+            <button
+              type="button"
+              disabled={!linkInput.trim()}
+              onClick={() => {
+                onApplyLinkCode(linkInput);
+                setLinkInput("");
+              }}
+              className="h-9 shrink-0 rounded-lg border border-line px-3 text-[11px] font-semibold text-muted disabled:opacity-40"
+            >
+              Vincular
+            </button>
+          </div>
         </section>
 
         <section className="rounded-2xl border border-line bg-surface p-3">

@@ -5,6 +5,8 @@ export interface SharedConfig {
   adminPin: string;
   adminHint?: string;
   technicians: Technician[];
+  uploadUrl?: string;
+  uploadToken?: string;
 }
 
 async function request(url: string, init?: RequestInit) {
